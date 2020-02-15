@@ -1,5 +1,12 @@
-require 'bit'
--- local bit=bit
+local bit
+if pcall(require, 'bit') then
+    bit = require 'bit'
+elseif _VERSION == 'Lua 5.2' then
+    bit = require 'bit32'
+else
+    bit = require 'luabit'
+end
+
 local BLACK = 'b'
 local WHITE = 'w'
 
@@ -20,15 +27,15 @@ local POSSIBLE_RESULTS = { '1-0', '0-1', '1/2-1/2', '*' }
 
 local PAWN_OFFSETS = {
     b = { 16, 32, 17, 15 },
-    w = {-16, -32, -17, -15 }
+    w = { -16, -32, -17, -15 }
 }
 
 local PIECE_OFFSETS = {
-    n = {-18, -33, -31, -14, 18, 33, 31, 14 },
-    b = {-17, -15, 17, 15 },
-    r = {-16, 1, 16, -1 },
-    q = {-17, -16, -15, 1, 17, 16, 15, -1 },
-    k = {-17, -16, -15, 1, 17, 16, 15, -1 }
+    n = { -18, -33, -31, -14, 18, 33, 31, 14 },
+    b = { -17, -15, 17, 15 },
+    r = { -16, 1, 16, -1 },
+    q = { -17, -16, -15, 1, 17, 16, 15, -1 },
+    k = { -17, -16, -15, 1, 17, 16, 15, -1 }
 }
 
 -- prettier-ignore
@@ -91,6 +98,16 @@ local BITS = {
     QSIDE_CASTLE = 64
 }
 
+local BITS_IDX = {
+    'NORMAL',
+    'CAPTURE',
+    'BIG_PAWN',
+    'EP_CAPTURE',
+    'PROMOTION',
+    'KSIDE_CASTLE',
+    'QSIDE_CASTLE',
+}
+
 local RANK_1 = 7
 local RANK_2 = 6
 local RANK_3 = 5
@@ -127,7 +144,7 @@ local ROOKS = {
 -- COMMON UTILITY FUNCTIONS --
 ------------------------------
 local function rank(i)
-    return bit.brshift(i, 4) -- i >> 4
+    return bit.rshift(i, 4) -- i >> 4
 end
 
 local function file(i)
@@ -144,7 +161,7 @@ local function swap_color(c)
 end
 
 local function is_digit(c)
-    return ({[0] = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 })[c] ~= nil
+    return ({ [0] = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 })[tonumber(c)] ~= nil
     -- return ('0123456789').indexOf(c) ~= -1
 end
 
@@ -153,9 +170,9 @@ local function clone(obj)
     local function _copy(org, res)
         for k, v in pairs(org) do
             if type(v) ~= "table" then
-                res[k] = v;
+                res[k] = v
             else
-                res[k] = {};
+                res[k] = {}
                 _copy(v, res[k])
             end
         end
@@ -177,7 +194,8 @@ local function stripped_san(move)
 end
 
 local function str_split(str, sep)
-    local sep, fields = sep or " ", {}
+    sep = sep or " "
+    local fields = {}
     local pattern = string.format("([^%s]+)", sep)
     str:gsub(pattern, function(c) fields[#fields + 1] = c end)
     return fields
@@ -254,10 +272,11 @@ local function validate_fen(fen)
     end
 
     --- 8th criterion = every row is valid?
-    for i, v in ipairs(rows) do
+    for _, v in ipairs(rows) do
         local sum_fields = 0
         local previous_was_number = false
-        v:gsub('.', function(ch)
+
+        for ch in v:gmatch('.') do
             if tonumber(ch) ~= nil then
                 if previous_was_number then
                     return { valid = false, error_number = 8, error = errors[8] }
@@ -271,7 +290,7 @@ local function validate_fen(fen)
                 sum_fields = sum_fields + 1
                 previous_was_number = false
             end
-        end)
+        end
         if sum_fields ~= 8 then
             return { valid = false, error_number = 10, error = errors[10] }
         end
@@ -289,6 +308,7 @@ end
 local function gen_squares()
     local keys = {} --array
     local i = SQUARES.a8
+    local sq_h1 = SQUARES.h1
     repeat
         if bit.band(i, 0x88) ~= 0 then
             i = i + 8
@@ -296,7 +316,7 @@ local function gen_squares()
             table.insert(keys, algebraic(i))
             i = i + 1
         end
-    until i > SQUARES.h1
+    until i > sq_h1
     return keys
 end
 local function gen_empty_board()
@@ -331,10 +351,8 @@ local Chess = {
 }
 Chess.__index = Chess
 
-function Chess:create(start_fen)
-    local obj = {}             -- our new object
-    setmetatable(obj, self)
-    -- init
+local function ctor(_m, start_fen)
+    --
     local self_board = gen_empty_board()  --new Array(128)
     local self_kings = { w = EMPTY, b = EMPTY }
     local self_turn = WHITE
@@ -344,7 +362,41 @@ function Chess:create(start_fen)
     local self_move_number = 1
     local self_history = {} --array
     local self_header = {}
+    local self_header_keys = {} --array, used to guarantee the order
     -------------------------------------------------
+
+    local function clear_header()
+        self_header_keys = {}
+        self_header = {}
+    end
+
+    local function remove_header(k)
+        if self_header[k] then
+            self_header[k] = nil
+            remove_header(k)
+            local p
+            for i, v in ipairs(self_header_keys) do
+                if v == k then
+                    p = i
+                    break
+                end
+            end
+            if p then
+                table.remove(self_header_keys, p)
+            end
+        end
+    end
+
+    local function add_header(k, v)
+        --assert(k and v)
+        if self_header[k] then
+            remove_header(k)
+        end
+        self_header[k] = v
+        table.insert(self_header_keys, k)
+    end
+
+
     -- called when the initial board setup is changed with put() or remove().
     -- modifies the SetUp and FEN properties of the header object.  if the FEN is
     -- equal to the default position, the SetUp and FEN are deleted
@@ -354,19 +406,20 @@ function Chess:create(start_fen)
         if #self_history > 0 then return end
 
         if fen ~= DEFAULT_POSITION then
-            self_header['SetUp'] = '1'
-            self_header['FEN'] = fen
+            add_header('SetUp', '1')
+            add_header('FEN', fen)
         else
-            self_header['SetUp'] = nil
-            self_header['FEN'] = nil
+            remove_header('SetUp')
+            remove_header('FEN')
         end
     end
 
     local function generate_fen()
-        local empty = 0;
-        local fen = '';
+        local empty = 0
+        local fen = ''
 
         local i = SQUARES.a8
+        local sq_h1 = SQUARES.h1
         repeat
             local idx = i + 1
             --!!!
@@ -378,8 +431,8 @@ function Chess:create(start_fen)
                     fen = fen .. empty
                     empty = 0
                 end
-                local color = piece.color;
-                local piece_type = piece.type;
+                local color = piece.color
+                local piece_type = piece.type
                 fen = fen .. (color == WHITE and piece_type:upper() or piece_type:lower())
             end
 
@@ -391,10 +444,11 @@ function Chess:create(start_fen)
                     fen = fen .. '/'
                 end
                 empty = 0
-                i = idx + 8
+                i = i + 8
             end
+            ---------
             i = i + 1
-        until i > SQUARES.h1
+        until i > sq_h1
 
         local cflags = ''
         if bit.band(self_castling[WHITE], BITS.KSIDE_CASTLE) ~= 0 then
@@ -414,9 +468,48 @@ function Chess:create(start_fen)
         if #cflags == 0 then
             cflags = '-'
         end
-        local epflags = self_ep_square == EMPTY and '-' or algebraic(self_ep_square);
+        local epflags = self_ep_square == EMPTY and '-' or algebraic(self_ep_square)
 
         return table.concat({ fen, self_turn, cflags, epflags, self_half_moves, self_move_number }, ' ')
+    end
+
+    local function ascii()
+        -- local s = '   +------------------------+\n'
+        local buffer = { '   +------------------------+\n' }
+        local i = SQUARES.a8
+        local sq_h1 = SQUARES.h1
+        repeat
+            -- display the rank
+            if file(i) == 0 then
+                local ri = rank(i) + 1
+                table.insert(buffer, string.format(' %s |', ('87654321'):sub(ri, ri)))
+                -- s += ' ' + '87654321'[rank(i)] + ' |'
+            end
+            local piece_obj = self_board[i + 1]
+            -- empty piece
+            if not piece_obj then
+                table.insert(buffer, ' . ')
+                -- s += ' . '
+            else
+                local piece = piece_obj.type
+                local color = piece_obj.color
+                local symbol = color == WHITE and piece:upper() or piece:lower()
+                table.insert(buffer, string.format(' %s ', symbol))
+                -- s += ' ' + symbol + ' '
+            end
+
+            if bit.band((i + 1), 0x88) ~= 0 then
+                table.insert(buffer, '|\n')
+                -- s += '|\n'
+                i = i + 8
+            end
+            i = i + 1
+        until i > sq_h1
+
+        table.insert(buffer, '   +------------------------+\n')
+        table.insert(buffer, '     a  b  c  d  e  f  g  h\n')
+
+        return table.concat(buffer)
     end
 
     local function clear(keep_headers)
@@ -429,16 +522,18 @@ function Chess:create(start_fen)
         self_move_number = 1
         self_history = {}
         if not keep_headers then
-            self_header = {}
+            --self_header = {}
+            clear_header()
         end
         update_setup(generate_fen())
     end
 
-    local function set_header(args)
-        for i = 1, #args, 2 do
-            local a1, a2 = args[i], args[i + 1]
+    local function set_header(headers)
+        for i = 1, #headers, 2 do
+            local a1, a2 = headers[i], headers[i + 1]
             if type(a1) == 'string' and type(a2) == 'string' then
-                self_header[a1] = a2
+                --self_header[a1] = a2
+                add_header(a1, a2)
             end
         end
         return self_header
@@ -462,7 +557,7 @@ function Chess:create(start_fen)
         end
 
         --check for piece
-        if SYMBOLS:find(p_type:lower()) then
+        if not SYMBOLS:find(p_type:lower()) then
             return false
         end
 
@@ -479,7 +574,7 @@ function Chess:create(start_fen)
         --!!!
         self_board[sq + 1] = { type = p_type, color = p_color }
         if p_type == KING then
-            self_kings[p_color] = sq;
+            self_kings[p_color] = sq
         end
         update_setup(generate_fen())
         return true
@@ -522,7 +617,7 @@ function Chess:create(start_fen)
             return false
         end
 
-        clear(keep_headers);
+        clear(keep_headers)
 
         position:gsub('.', function(ch)
             if ch == '/' then
@@ -536,7 +631,7 @@ function Chess:create(start_fen)
             end
         end)
 
-        self_turn = tokens[2];
+        self_turn = tokens[2]
 
         local tokens_3 = tokens[3]
 
@@ -545,15 +640,15 @@ function Chess:create(start_fen)
         end
         if tokens_3:find('Q') then
             self_castling.w = bit.bor(self_castling.w, BITS.QSIDE_CASTLE)
-            -- self_castling.w |= BITS.QSIDE_CASTLE;
+            -- self_castling.w |= BITS.QSIDE_CASTLE
         end
         if tokens_3:find('k') then
             self_castling.b = bit.bor(self_castling.b, BITS.KSIDE_CASTLE)
-            -- self_castling.b |= BITS.KSIDE_CASTLE;
+            -- self_castling.b |= BITS.KSIDE_CASTLE
         end
         if tokens_3:find('q') then
             self_castling.b = bit.bor(self_castling.b, BITS.QSIDE_CASTLE)
-            --   self_castling.b |= BITS.QSIDE_CASTLE;
+            --   self_castling.b |= BITS.QSIDE_CASTLE
         end
 
         --En passant target square
@@ -562,9 +657,9 @@ function Chess:create(start_fen)
         self_half_moves = tonumber(tokens[5], 10)
         self_move_number = tonumber(tokens[6], 10)
 
-        update_setup(generate_fen());
+        update_setup(generate_fen())
 
-        return true;
+        return true
     end
 
     local function reset()
@@ -573,6 +668,7 @@ function Chess:create(start_fen)
 
     local function attacked(color, square)
         local i = SQUARES.a8
+        local sq_h1 = SQUARES.h1
         repeat
             -- did we run off the end of the board
             if bit.band(i, 0x88) ~= 0 then
@@ -603,7 +699,8 @@ function Chess:create(start_fen)
 
                             local blocked = false
                             while j ~= square do
-                                if not self_board[j + 1] then --!!!
+                                if self_board[j + 1] then
+                                    --!!!
                                     blocked = true
                                     break
                                 end
@@ -617,7 +714,7 @@ function Chess:create(start_fen)
                 --
                 i = i + 1
             end
-        until i > SQUARES.h1
+        until i > sq_h1
 
         return false
     end
@@ -631,7 +728,7 @@ function Chess:create(start_fen)
     end
 
     local function make_move(move)
-        local us = self_turn;
+        local us = self_turn
         local them = swap_color(us)
         push(move)
 
@@ -656,7 +753,8 @@ function Chess:create(start_fen)
         end
 
         -- if we moved the king
-        if self_board[move_to_i].type == KING then --!!!
+        if self_board[move_to_i].type == KING then
+            --!!!
             self_kings[self_board[move_to_i].color] = move_to --!!!
             -- if we castled, move the rook next to the king
             if bit.band(move.flags, BITS.KSIDE_CASTLE) ~= 0 then
@@ -678,7 +776,8 @@ function Chess:create(start_fen)
         local self_castling_us = self_castling[us]
         if self_castling_us and self_castling_us ~= 0 and self_castling_us ~= '' then
             local ROOKS_us = ROOKS[us]
-            for _, r in ipairs(ROOKS_us) do --!!!
+            for _, r in ipairs(ROOKS_us) do
+                --!!!
                 if move_from == r.square and bit.band(self_castling_us, r.flag) ~= 0 then
                     self_castling[us] = bit.bxor(self_castling_us, r.flag)
                     break
@@ -690,7 +789,8 @@ function Chess:create(start_fen)
         local self_castling_them = self_castling[them]
         if self_castling_them and self_castling_them ~= 0 and self_castling_them ~= '' then
             local ROOKS_them = ROOKS[them]
-            for _, r in ipairs(ROOKS_them) do --!!!
+            for _, r in ipairs(ROOKS_them) do
+                --!!!
                 if move_to == r.square and bit.band(self_castling_them, r.flag) ~= 0 then
                     self_castling[them] = bit.bxor(self_castling_them, r.flag)
                     break
@@ -706,12 +806,12 @@ function Chess:create(start_fen)
                 self_ep_square = move_to + 16
             end
         else
-            self_ep_square = EMPTY;
+            self_ep_square = EMPTY
         end
 
         -- reset the 50 move counter if a pawn is moved or a piece is captured
         if move.piece == PAWN then
-            self_half_moves = 0;
+            self_half_moves = 0
         elseif bit.band(move.flags, bit.bor(BITS.CAPTURE, BITS.EP_CAPTURE)) ~= 0 then
             self_half_moves = 0
         else
@@ -730,7 +830,7 @@ function Chess:create(start_fen)
             return
         end
         local old = self_history[count]
-        table.remove(self_history, count)
+        table.remove(self_history)
 
         local move = old.move
         self_kings = old.kings
@@ -786,6 +886,7 @@ function Chess:create(start_fen)
         local sq_color = 0
 
         local i = SQUARES.a8
+        local sq_h1 = SQUARES.h1
         repeat
             sq_color = (sq_color + 1) % 2
             if bit.band(i, 0x88) ~= 0 then
@@ -804,7 +905,7 @@ function Chess:create(start_fen)
                 ---
                 i = i + 1
             end
-        until i > SQUARES.h1
+        until i > sq_h1
 
         -- k vs. k
         if num_pieces == 2 then
@@ -812,11 +913,12 @@ function Chess:create(start_fen)
         elseif num_pieces == 3 and (pieces[BISHOP] == 1 or pieces[KNIGHT] == 1) then
             -- k vs. kn .... or .... k vs. kb
             return true
-        elseif num_pieces == pieces[BISHOP] + 2 then
+        elseif num_pieces - 2 == pieces[BISHOP] then
             -- kb vs. kb where any number of bishops are all on the same color
             local sum = 0
             local len = #bishops
-            for _, v in ipairs(bishops) do --!!
+            for _, v in ipairs(bishops) do
+                --!!
                 sum = sum + v
             end
             if sum == 0 or sum == len then
@@ -843,10 +945,10 @@ function Chess:create(start_fen)
             table.insert(moves, move)
         end
 
-        for _, m in ipairs(moves) do
+        for i = #moves, 0, -1 do
             -- remove the last two fields in the FEN string, they're not needed
             -- when checking for draw by rep
-            local fen = table.concat(str_split(generate_fen(), ' '), ' ', 1, 4)
+            local fen = table.concat(str_split(generate_fen()), ' ', 1, 4)
 
             -- has the position occurred three or move times
             local p = positions[fen]
@@ -854,7 +956,11 @@ function Chess:create(start_fen)
             if positions[fen] >= 3 then
                 repetition = true
             end
-            make_move(m)
+
+            local m = moves[i]
+            if m then
+                make_move(m)
+            end
         end
 
         return repetition
@@ -885,7 +991,8 @@ function Chess:create(start_fen)
         return move
     end
 
-    local function generate_moves(options) --: array
+    local function generate_moves(options)
+        --: array
         local function add_move(board, moves, from, to, flags)
             --board は、self_board です
             -- if pawn promotion --!!!
@@ -913,15 +1020,21 @@ function Chess:create(start_fen)
         local legal = true
 
         if type(options) == 'table' then
-            legal = options.legal
+            if options.legal ~= nil then
+                legal = options.legal
+            end
             -- are we generating moves for a single square?
-            local sq = SQUARES[options.square]
-            if sq then
-                first_sq = sq
-                last_sq = sq
-                single_square = true
-            else
-                return {} --array
+            local opt_sq = options.square
+            if opt_sq ~= nil then
+                local sq = SQUARES[options.square]
+                if sq then
+                    first_sq = sq
+                    last_sq = sq
+                    single_square = true
+                else
+                    -- invalid square
+                    return {} --array
+                end
             end
         end
 
@@ -939,32 +1052,37 @@ function Chess:create(start_fen)
                         local PAWN_OFFSETS_us = PAWN_OFFSETS[us]
                         -- single square, non-capturingy
                         local square = i + PAWN_OFFSETS_us[1] --!!!
-                        if not self_board[square + 1] then --!!!
+                        if not self_board[square + 1] then
+                            --!!!
                             add_move(self_board, moves, i, square, BITS.NORMAL)
                             -- double square
-                            local square = i + PAWN_OFFSETS_us[2] --!!!
-                            if second_rank[us] == rank(i) and not self_board[square + 1] then --!!!
-                                add_move(self_board, moves, i, square, BITS.BIG_PAWN)
+                            local m_square = i + PAWN_OFFSETS_us[2] --!!!
+                            if second_rank[us] == rank(i) and not self_board[m_square + 1] then
+                                --!!!
+                                add_move(self_board, moves, i, m_square, BITS.BIG_PAWN)
                             end
                         end
 
-                        -- pawn captures 
-                        for j = 3, 4 do --!!!
-                            local square = i + PAWN_OFFSETS_us[j]
-                            if bit.band(square, 0x88) == 0 then
-                                local enemy = self_board[square + 1]--!!!
+                        -- pawn captures
+                        for j = 3, 4 do
+                            --!!!
+                            local m_square = i + PAWN_OFFSETS_us[j]
+                            if bit.band(m_square, 0x88) == 0 then
+                                local enemy = self_board[m_square + 1] --!!!
                                 if enemy and enemy.color == them then
-                                    add_move(self_board, moves, i, square, BITS.CAPTURE)
-                                elseif square == self_ep_square then
+                                    add_move(self_board, moves, i, m_square, BITS.CAPTURE)
+                                elseif m_square == self_ep_square then
                                     add_move(self_board, moves, i, self_ep_square, BITS.EP_CAPTURE)
                                 end
                             end
                         end
                     else
                         local offsets = PIECE_OFFSETS[piece.type]
-                        for _, offset in ipairs(offsets) do --!!!
+                        for _, offset in ipairs(offsets) do
+                            --!!!
                             local square = i
-                            while (true) do -- 俥 相 后
+                            while (true) do
+                                --
                                 square = square + offset
                                 if bit.band(square, 0x88) ~= 0 then break end
                                 local enemy = self_board[square + 1] --!!!
@@ -989,20 +1107,19 @@ function Chess:create(start_fen)
         -- check for castling if: a) we're generating all moves, or b) we're doing
         -- single square move generation on the king's square
         if not single_square or last_sq == self_kings[us] then
-            -- king-side castling 
+            -- king-side castling
             if bit.band(self_castling[us], BITS.KSIDE_CASTLE) ~= 0 then
                 local castling_from = self_kings[us]
                 local castling_to = castling_from + 2
 
                 --!!!
-                if
-                not self_board[castling_from + 2] and
-                not self_board[castling_to + 1] and
-                not attacked(them, self_kings[us]) and
-                not attacked(them, castling_from + 1) and
-                not attacked(them, castling_to)
+                if not self_board[castling_from + 2] and
+                        not self_board[castling_to + 1] and
+                        not attacked(them, self_kings[us]) and
+                        not attacked(them, castling_from + 1) and
+                        not attacked(them, castling_to)
                 then
-                    add_move(self_board, moves, self_kings[us], castling_to, BITS.KSIDE_CASTLE);
+                    add_move(self_board, moves, self_kings[us], castling_to, BITS.KSIDE_CASTLE)
                 end
             end
 
@@ -1011,13 +1128,12 @@ function Chess:create(start_fen)
                 local castling_from = self_kings[us]
                 local castling_to = castling_from - 2
                 --!!!
-                if
-                not self_board[castling_from] and
-                not self_board[castling_from - 1] and
-                not self_board[castling_from - 2] and
-                not attacked(them, self_kings[us]) and
-                not attacked(them, castling_from - 1) and
-                not attacked(them, castling_to)
+                if not self_board[castling_from] and
+                        not self_board[castling_from - 1] and
+                        not self_board[castling_from - 2] and
+                        not attacked(them, self_kings[us]) and
+                        not attacked(them, castling_from - 1) and
+                        not attacked(them, castling_to)
                 then
                     add_move(self_board, moves, self_kings[us], castling_to, BITS.QSIDE_CASTLE)
                 end
@@ -1033,7 +1149,7 @@ function Chess:create(start_fen)
         -- filter out illegal moves
         local legal_moves = {} --array
         for _, m in ipairs(moves) do
-            make_move(m);
+            make_move(m)
             if not king_attacked(us) then
                 table.insert(legal_moves, m)
             end
@@ -1059,6 +1175,59 @@ function Chess:create(start_fen)
             return #moves == 0
         end
         return false
+    end
+
+    -- this function is used to uniquely identify ambiguous moves
+    local function get_disambiguator(move, sloppy)
+        local moves = generate_moves({ legal = not sloppy }) --array
+
+        local from = move.from
+        local to = move.to
+        local piece = move.piece
+
+        local ambiguities = 0
+        local same_rank = 0
+        local same_file = 0
+
+        for _, m in ipairs(moves) do
+            --!!!
+            local ambig_from = m.from
+            local ambig_to = m.to
+            local ambig_piece = m.piece
+
+            -- if a move of the same piece type ends on the same to square, we'll
+            -- need to add a disambiguator to the algebraic notation
+            if piece == ambig_piece and from ~= ambig_from and to == ambig_to then
+                ambiguities = ambiguities + 1
+
+                if rank(from) == rank(ambig_from) then
+                    same_rank = same_rank + 1
+                end
+
+                if file(from) == file(ambig_from) then
+                    same_file = same_file + 1
+                end
+            end
+        end
+
+        if ambiguities > 0 then
+            -- if there exists a similar moving piece on the same rank and file as
+            -- the move in question, use the square as the disambiguator
+            if same_rank > 0 and same_file > 0 then
+                return algebraic(from)
+            elseif same_file > 0 then
+                -- if the moving piece rests on the same file, use the rank symbol as the
+                -- disambiguator
+                --!!!
+                return algebraic(from):sub(2, 2)
+            else
+                -- else use the file symbol
+                --!!!
+                return algebraic(from):sub(1, 1)
+            end
+        end
+
+        return ''
     end
 
     -- convert a move from 0x88 coordinates to Standard Algebraic Notation
@@ -1092,10 +1261,10 @@ function Chess:create(start_fen)
                 output = output .. 'x'
             end
 
-            output = output .. algebraic(move.to);
+            output = output .. algebraic(move.to)
 
             if bit.band(move_flags, BITS.PROMOTION) ~= 0 then
-                output = output .. '=' + move.promotion.upper()
+                output = output .. '=' .. move.promotion:upper()
             end
         end
 
@@ -1107,9 +1276,9 @@ function Chess:create(start_fen)
                 output = output .. '+'
             end
         end
-        undo_move();
+        undo_move()
 
-        return output;
+        return output
     end
 
     -------------------------------------------------
@@ -1125,19 +1294,21 @@ function Chess:create(start_fen)
             piece, from, to, promotion = clean_move:match("([pnbrqkPNBRQK]?)([a-h][1-8])x?%-?([a-h][1-8])([qrbnQRBN]?)")
         end
 
-        local moves = generate_moves()
-        -- local i = 0
-        --moves : array
+        local moves = generate_moves() --array
+
         for _, v in ipairs(moves) do
+
             -- try the strict parser first, then the sloppy parser if requested
             -- by the user
             if (clean_move == stripped_san(move_to_san(v))) or (sloppy and clean_move == stripped_san(move_to_san(v, true)))
             then
                 return v
             else
-                if (not piece or piece:lower() == v.piece)
-                and SQUARES[from] == v.from and SQUARES[to] == v.to
-                and (not promotion or promotion:lower() == v.promotion) then
+                if (not piece or piece == '' or piece:lower() == v.piece)
+                        and SQUARES[from] == v.from
+                        and SQUARES[to] == v.to
+                        and (not promotion or promotion == '' or promotion:lower() == v.promotion)
+                then
                     return v
                 end
             end
@@ -1157,9 +1328,12 @@ function Chess:create(start_fen)
 
         local flags = ''
 
-        for flag, v in pairs(BITS) do
+        for i = 1, #BITS_IDX do
+            local flag = BITS_IDX[i]
+            local v = BITS[flag]
+
             if bit.band(v, move.flags) ~= 0 then
-                flags = flags + FLAGS[flag]
+                flags = flags .. FLAGS[flag]
             end
         end
         move.flags = flags
@@ -1174,10 +1348,10 @@ function Chess:create(start_fen)
     local function perft(depth)
         local moves = generate_moves({ legal = false })
         local nodes = 0
-        local color = turn
+        local color = self_turn
 
         --moves : array
-        for k, v in ipairs(moves) do
+        for _, v in ipairs(moves) do
             make_move(v)
             if not king_attacked(color) then
                 if depth - 1 > 0 then
@@ -1199,12 +1373,411 @@ function Chess:create(start_fen)
     -------------------------------------------
     --- PUBLIC API
     -------------------------------------------
+    -- our new object
+    local obj = {
+        load = load,
+        reset = reset,
+        moves = function(options)
+            -- The internal representation of a chess move is in 0x88 format, and
+            -- not meant to be human-readable.  The code below converts the 0x88
+            -- square coordinates to algebraic coordinates.  It also prunes an
+            -- unnecessary move keys resulting from a verbose call.
+            local ugly_moves = generate_moves(options)
+            local moves = {} --array
+            for _, um in ipairs(ugly_moves) do
+                -- does the user want a full move object (most likely not), or just
+                -- SAN
+                if options and options.verbose then
+                    table.insert(moves, make_pretty(um))
+                else
+                    table.insert(moves, move_to_san(um, false))
+                end
+            end
+            return moves
+        end,
+        in_check = in_check,
+        in_checkmate = in_checkmate,
+        in_stalemate = in_stalemate,
+        in_draw = function()
+            return self_half_moves >= 100 or in_stalemate() or insufficient_material() or in_threefold_repetition()
+        end,
+        insufficient_material = insufficient_material,
+        in_threefold_repetition = in_threefold_repetition,
+        game_over = function()
+            return self_half_moves >= 100 or in_checkmate() or in_stalemate() or insufficient_material() or in_threefold_repetition()
+        end,
+        validate_fen = validate_fen,
+        fen = generate_fen,
+        board = function()
+            local output = {} --array
+            local row = {} --array
+
+            local i = SQUARES.a8
+            local sq_h1 = SQUARES.h1
+            repeat
+                local piece = self_board[i + 1]
+                if type(piece) ~= 'table' then
+                    table.insert(row, false)
+                else
+                    table.insert(row, { type = piece.type, color = piece.color })
+                end
+                if bit.band((i + 1), 0x88) ~= 0 then
+                    table.insert(output, row)
+                    row = {} --array
+                    i = i + 8
+                end
+                ----
+                i = i + 1
+            until i > sq_h1
+
+            return output
+        end,
+        pgn = function(options)
+            -- using the specification from http://www.chessclub.com/help/PGN-spec
+            -- example for html usage: .pgn({ max_width: 72, newline_char: "<br />" })
+            local newline = '\n'
+            local max_width = 0
+
+            if type(options) == 'table' then
+                local opt_nl = options.newline_char
+                if type(opt_nl) == 'string' and #opt_nl > 0 then
+                    newline = opt_nl
+                end
+                local opt_mw = options.max_width
+                if type(opt_mw) == 'number' and opt_mw > 0 then
+                    max_width = opt_mw
+                end
+            end
+
+            local result = {} --array
+            local header_exists = false
+
+            -- add the PGN header headerrmation
+            for _, k in ipairs(self_header_keys) do
+                local h = self_header[k]
+                if h then
+                    table.insert(result, string.format('[%s "%s"]%s', k, h, newline))
+                    header_exists = true
+                end
+            end
+
+            if header_exists and #self_history > 0 then
+                table.insert(result, newline)
+            end
+
+            -- pop all of history onto reversed_history
+            local reversed_history = {} --array
+            while #self_history > 0 do
+                table.insert(reversed_history, undo_move())
+            end
+
+            local moves = {} --array
+            local move_string_buffer = ''
+
+            -- build the list of moves.  a move_string looks like: "3. e3 e6"
+            for i = #reversed_history, 1, -1 do
+                local move = reversed_history[i]
+
+                -- if the position started with black to move, start PGN with 1. ...
+                if #self_history == 0 and move.color == 'b' then
+                    move_string_buffer = self_move_number .. '. ...'
+                elseif move.color == 'w' then
+                    -- store the previous generated move_string if we have one
+                    if #move_string_buffer > 0 then
+                        table.insert(moves, move_string_buffer)
+                    end
+                    move_string_buffer = self_move_number .. '.'
+                end
+
+                move_string_buffer = string.format('%s %s', move_string_buffer, move_to_san(move, false))
+
+                make_move(move)
+            end
+
+            -- are there any other leftover moves?
+            if #move_string_buffer > 0 then
+                table.insert(moves, move_string_buffer)
+            end
+
+            -- is there a result?
+            if self_header.Result then
+                table.insert(moves, self_header.Result)
+            end
+
+            -- history should be back to what is was before we started generating PGN,
+            -- so join together moves
+            if max_width == 0 then
+                return table.concat(result, '') .. table.concat(moves, ' ')
+            end
+
+            -- wrap the PGN output at max_width
+            local current_width = 0
+            for i, m in ipairs(moves) do
+                local m_len = #m
+                -- if the current move will push past max_width
+                if current_width + m_len > max_width and i ~= 1 then
+                    -- don't end the line with whitespace
+                    local result_len = #result
+                    if result[result_len] == ' ' then
+                        table.remove(result, result_len)
+                    end
+                    table.insert(result, newline)
+                    current_width = 0
+                elseif i ~= 1 then
+                    table.insert(result, ' ')
+                    current_width = current_width + 1
+                end
+                table.insert(result, m)
+                current_width = current_width + m_len
+            end
+
+            return table.concat(result)
+        end,
+        load_pgn = function(pgn, options)
+            -- allow the user to specify the sloppy move parser to work around over
+            -- disambiguation bugs in Fritz and Chessbase
+            local sloppy = false
+            if options and options.sloppy ~= nil then
+                sloppy = options.sloppy
+            end
+
+            --local function mask(str)
+            --    return str:gsub('([( ).%%+-*?%[%]^$])', '%%%1')
+            --end
+
+            local function split(str, sep)
+                sep = sep or ' '
+                local fields = {}
+                local len = #str
+                local split_start = 1
+                while split_start <= len do
+                    local i_start, i_end = str:find(sep, split_start)
+                    if not i_start then
+                        local s = str:sub(split_start)
+                        -- print(s,split_start,str)
+                        if #s > 0 then
+                            table.insert(fields, s)
+                        end
+                        break
+                    elseif i_start <= i_end then
+                        local s = str:sub(split_start, i_start - 1)
+                        if #s > 0 then
+                            table.insert(fields, s)
+                        end
+                        split_start = i_end + 1
+                    else
+                        local s = str:sub(split_start, i_start)
+                        if #s > 0 then
+                            table.insert(fields, s)
+                        else
+                            break
+                        end
+                        split_start = i_start + 1
+                    end
+                end
+                return fields
+            end
+
+            local function parse_pgn_header(header, opt)
+                local newline_char = opt and type(opt.newline_char) == 'string' and opt.newline_char or '\r?\n'
+                local header_obj = {}
+                local headers = split(header, newline_char) --array
+                local key = ''
+                local value = ''
+
+                for _, h in ipairs(headers) do
+                    key = h:gsub('^%[([A-Z][A-Za-z]*)%s.*%]$', '%1')
+                    value = h:gsub('^%[[A-Za-z]+%s"(.*)"%]$', '%1')
+                    if #trim(key) > 0 then
+                        header_obj[key] = value
+                    end
+                end
+                return header_obj
+            end
+
+            local newline_char = options and type(options.newline_char) == 'string' and options.newline_char or '\r?\n'
+
+            -- RegExp to split header. Takes advantage of the fact that header and movetext
+            -- will always have a blank line between them (ie, two newline_char's).
+            -- With default newline_char, will equal: /^(\[((?:\r?\n)|.)*\])(?:\r?\n){2}/
+            ---NOTE: just split pgn string by two newline_char's
+            local split_pgn = split(pgn, newline_char:rep(2))
+
+            -- If no header given, begin with moves.
+            local header_string = #split_pgn == 2 and split_pgn[1] or ''
+
+            -- Put the board in the starting position
+            reset()
+
+            -- parse PGN header
+            local headers = parse_pgn_header(header_string, options)
+            for key, value in pairs(headers) do
+                set_header({ key, value })
+            end
+
+            -- load the starting position indicated by [Setup '1'] and
+            -- [FEN position]
+            if headers['SetUp'] == '1' then
+                if not (headers.FEN and load(headers.FEN, true)) then
+                    -- second argument to load: don't clear the headers
+                    return false
+                end
+            end
+
+            -- delete header to get the moves
+            local ms = header_string ~= '' and split_pgn[2] or split_pgn[1]
+            ms = ms:gsub(newline_char, ' ')
+
+            -- delete comments
+            -- /(\{[^}]+\})+?/g
+            ms = ms:gsub('%b{}', '') --???
+
+            -- delete recursive annotation variations
+            -- /(\([^\(\)]+\))+?/g
+            ms = ms:gsub('%b()', '') --???
+
+            -- delete move numbers
+            -- /\d+\.(\.\.)?/g
+            ms = ms:gsub('%d+%.%.%.', ''):gsub('%d+%.', '')
+
+            -- delete ... indicating black to move
+            -- /\.\.\./g
+            ms = ms:gsub('%.%.%.', '')
+
+            -- delete numeric annotation glyphs
+            -- /\$\d+/g
+            ms = ms:gsub('%$%d+', '')
+
+            -- trim and get array of moves
+            -- empty entries will also be removed
+            local moves = str_split(ms)
+
+            local move
+            local moves_len = #moves
+            for hm = 1, moves_len - 1 do
+                move = move_from_san(moves[hm], sloppy)
+
+                -- move not possible! (don't clear the board to examine to show the
+                -- latest valid position)
+                if not move then
+                    return false
+                else
+                    make_move(move)
+                end
+            end
+
+            -- examine last move
+            move = moves[moves_len]
+
+            local results_test = {}
+            for _, r in ipairs(POSSIBLE_RESULTS) do
+                results_test[r] = true
+            end
+
+            if results_test[move] then
+                if #self_header_keys > 0 and not self_header.Result then
+                    set_header({ 'Result', move })
+                end
+            else
+                move = move_from_san(move, sloppy)
+                if not move then
+                    return false
+                else
+                    make_move(move)
+                end
+            end
+            return true
+        end,
+        header = function(...) return set_header({ ... }) end,
+        ascii = ascii,
+        turn = function()
+            return self_turn
+        end,
+        move = function(move, options)
+            -- The move function can be called with in the following parameters:
+            --
+            -- .move('Nxb7')      <- where 'move' is a case-sensitive SAN string
+            --
+            -- .move({ from= 'h7', <- where the 'move' is a move object (additional
+            --         to ='h8',      fields are ignored)
+            --         promotion= 'q',
+            --      })
+            -- allow the user to specify the sloppy move parser to work around over
+            -- disambiguation bugs in Fritz and Chessbase
+            local sloppy = false
+            if options and options.sloppy ~= nil then sloppy = options.sloppy end
+
+            local move_obj
+
+            if type(move) == 'string' then
+                move_obj = move_from_san(move, sloppy)
+            elseif type(move) == 'table' then
+                local moves = generate_moves()
+
+                -- convert the pretty move object to an ugly move object
+                for _, mv in ipairs(moves) do
+                    if move.from == algebraic(mv.from) and move.to == algebraic(mv.to) and ((not mv.promotion) or move.promotion == mv.promotion)
+                    then
+                        move_obj = mv
+                        break
+                    end
+                end
+            end
+
+            -- failed to find move
+            if not move_obj then
+                return
+            end
+
+            -- need to make a copy of move because we can't generate SAN after the
+            -- move is made
+            local pretty_move = make_pretty(move_obj)
+
+            make_move(move_obj)
+
+            return pretty_move
+        end,
+        undo = function()
+            local move = undo_move()
+            return move and make_pretty(move) or nil
+        end,
+        clear = clear,
+        put = put,
+        get = get,
+        remove = remove,
+        perft = perft,
+        square_color = function(square)
+            if SQUARES[square] then
+                local sq_0x88 = SQUARES[square]
+                return (rank(sq_0x88) + file(sq_0x88)) % 2 == 0 and 'light' or 'dark'
+            end
+            return
+        end,
+        history = function(options)
+            local reversed_history = {} --array
+            local move_history = {} --array
+            local verbose = options and options.verbose ~= nil and options.verbose
+
+            while #self_history > 0 do
+                table.insert(reversed_history, undo_move())
+            end
+
+            for i = #reversed_history, 1, -1 do
+                local move = reversed_history[i]
+                if verbose then
+                    table.insert(move_history, make_pretty(move))
+                else
+                    table.insert(move_history, move_to_san(move))
+                end
+                make_move(move)
+            end
+
+            return move_history
+        end
+    }
+    setmetatable(obj, _m)
     return obj
 end
+setmetatable(Chess, { __call = ctor })
 
-local _M = {}
-setmetatable(_M, { __index = Chess, __call = function(self, ...)
-    return self:create(...)
-end
-})
--- return _M-- for k,v in pairs(gen_squares()) do print(k,rank(k),file(k),algebraic(k),v,type(v)) end-- print(#gen_squares())-- for k=0,SQUARES.h1 do print(k,rank(k),file(k),algebraic(k)) end        
+return Chess
