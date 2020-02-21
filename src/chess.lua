@@ -1404,7 +1404,27 @@ local function ctor(_m, start_fen)
         insufficient_material = insufficient_material,
         in_threefold_repetition = in_threefold_repetition,
         game_over = function()
-            return self_half_moves >= 100 or in_checkmate() or in_stalemate() or insufficient_material() or in_threefold_repetition()
+            if in_checkmate() then
+                return true, 'checkmate'
+            end
+
+            if in_stalemate() then
+                return true, 'draw', 'Stalemate'
+            end
+
+            if self_half_moves >= 100 then
+                return true, 'draw', 'Fifty-move rule'
+            end
+
+            if insufficient_material() then
+                return true, 'draw', 'Insufficient material'
+            end
+
+            if in_threefold_repetition() then
+                return true, 'draw', 'Threefold repetition'
+            end
+
+            return false
         end,
         validate_fen = validate_fen,
         fen = generate_fen,
