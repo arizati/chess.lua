@@ -1,15 +1,15 @@
-# Chess.lua
+# Chess.lua [![Build Status](https://travis-ci.com/FlynnWhatever/chess.lua.svg?branch=master)](https://travis-ci.com/FlynnWhatever/chess.lua)
 
 - A basic chess library ported from https://github.com/jhlywa/chess.js
 - Without chess engine.
-- For Lua5.1, it requires bitwise library.
+- For lua5.1, it is recommended to use extra bit manipulation library to improve performance
 
 ## Example
 
 ```lua
 local Chess = require('chess')
 local chess = Chess()
-math.randomseed(tostring(os.time()):reverse():sub(1, 7))
+math.randomseed(os.time())
 while true do
     local moves = chess.moves()
     if #moves == 0 then

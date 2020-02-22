@@ -1,10 +1,12 @@
 local bit
 if pcall(require, 'bit') then
     bit = require 'bit'
-elseif _VERSION == 'Lua 5.2' then
+elseif pcall(require, 'bit32') then
     bit = require 'bit32'
+elseif _VERSION == 'Lua 5.3' then
+    bit = require((...):match('(.-)[^%/]+$') .. 'lua53bit')
 else
-    bit = require 'luabit'
+    bit = require((...):match('(.-)[^%/]+$') .. 'nobitop')
 end
 
 local BLACK = 'b'
@@ -110,10 +112,10 @@ local BITS_IDX = {
 
 local RANK_1 = 7
 local RANK_2 = 6
-local RANK_3 = 5
-local RANK_4 = 4
-local RANK_5 = 3
-local RANK_6 = 2
+--local RANK_3 = 5
+--local RANK_4 = 4
+--local RANK_5 = 3
+--local RANK_6 = 2
 local RANK_7 = 1
 local RANK_8 = 0
 
@@ -234,7 +236,7 @@ local function validate_fen(fen)
         return { valid = false, error_number = 2, error = errors[2] }
     end
 
-    --- 3rd criterion: half move counter is an integer >= 0? 
+    --- 3rd criterion: half move counter is an integer >= 0?
     local t5 = tonumber(tokens[5])
     if type(t5) ~= "number" or t5 < 0 then
         return { valid = false, error_number = 3, error = errors[3] }
@@ -265,7 +267,7 @@ local function validate_fen(fen)
         return { valid = false, error_number = 6, error = errors[6] }
     end
 
-    --- 7th criterion: 1st field contains 8 rows? 
+    --- 7th criterion: 1st field contains 8 rows?
     local rows = str_split(tokens[1], '/')
     if #rows ~= 8 then
         return { valid = false, error_number = 7, error = errors[7] }
@@ -1093,7 +1095,7 @@ local function ctor(_m, start_fen)
                                     add_move(self_board, moves, i, square, BITS.CAPTURE)
                                     break
                                 end
-                                -- break, if knight or king 
+                                -- break, if knight or king
                                 if piece.type == 'n' or piece.type == 'k' then break end
                             end
                         end
@@ -1412,16 +1414,16 @@ local function ctor(_m, start_fen)
                 return true, 'draw', 'Stalemate'
             end
 
-            if self_half_moves >= 100 then
-                return true, 'draw', 'Fifty-move rule'
-            end
-
             if insufficient_material() then
                 return true, 'draw', 'Insufficient material'
             end
 
             if in_threefold_repetition() then
                 return true, 'draw', 'Threefold repetition'
+            end
+
+            if self_half_moves >= 100 then
+                return true, 'draw', 'Fifty-move rule'
             end
 
             return false

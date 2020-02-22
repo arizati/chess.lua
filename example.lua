@@ -17,4 +17,6 @@ while true do
     end
 end
 print(chess.pgn())
+print(chess.ascii())
+print(chess.fen())
 print()

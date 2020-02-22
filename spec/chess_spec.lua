@@ -13,10 +13,10 @@ local function forEach(t, fn)
     end
 end
 
-function table.contains(table, element)
-    if table == nil then return false end
+function table.contains(tb, element)
+    if tb == nil then return false end
 
-    for _, value in pairs(table) do
+    for _, value in pairs(tb) do
         if value == element then
             return true
         end
@@ -234,7 +234,7 @@ describe("Algebraic Notation #algebraic", function()
             if #moves ~= #expect then
                 passed = false
             else
-                forEach(expect, function(v, i)
+                forEach(expect, function(v)
                     passed = table.contains(moves, v)
                 end)
             end
@@ -301,7 +301,7 @@ describe("Get/Put/Remove #get #put #remove", function()
             end
             -- iterate over every square to make sure get returns the proper
             -- piece values/color
-            for j, square in ipairs(chess.SQUARES) do
+            for _, square in ipairs(chess.SQUARES) do
                 local pp = position.pieces[square]
                 if pp == nil then
                     if chess.get(square) then
@@ -318,7 +318,7 @@ describe("Get/Put/Remove #get #put #remove", function()
             end
             if passed then
                 -- remove the pieces
-                for j, square in ipairs(chess.SQUARES) do
+                for _, square in ipairs(chess.SQUARES) do
                     local piece = chess.remove(square)
                     local pp = position.pieces[square]
                     if pp == nil and piece then
@@ -1286,7 +1286,7 @@ describe('Regression Tests #reg', function()
         }
 
         local chess = Chess()
-        local result = chess.load_pgn(table.concat(pgn, '\n'))
+        chess.load_pgn(table.concat(pgn, '\n'))
         local expected = {
             Event = 'Test Olympiad',
             Site = 'Earth',
@@ -1317,7 +1317,7 @@ describe('Regression Tests #reg', function()
         }
 
         local chess = Chess()
-        local result = chess.load_pgn(table.concat(pgn, '\n'))
+        chess.load_pgn(table.concat(pgn, '\n'))
         chess.clear()
         local expected = {
             FEN = '8/8/8/8/8/8/8/8 w - - 0 1',
@@ -1326,5 +1326,4 @@ describe('Regression Tests #reg', function()
         assert.are.same(expected, chess.header())
     end)
 end)
-
 
