@@ -1,4 +1,4 @@
-# Chess.lua [![Build Status](https://travis-ci.com/FlynnWhatever/chess.lua.svg?branch=master)](https://travis-ci.com/FlynnWhatever/chess.lua)
+# Chess.lua [![Build Status](https://travis-ci.com/arizati/chess.lua.svg?branch=master)](https://travis-ci.com/arizati/chess.lua)
 
 - A basic chess library ported from https://github.com/jhlywa/chess.js
 - Without chess engine.
