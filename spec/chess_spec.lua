@@ -782,6 +782,331 @@ describe("Load PGN #loadpgn", function()
 
 end)
 
+describe(
+        "Manipulate Comments #mpcmts",
+        function()
+            -- var is_empty = function (object) {
+            --     for (var property in object) {
+            --       if (object.hasOwnProperty(property)) {
+            --         return false;
+            --       }
+            --     }
+            --     return true;
+            -- };
+            it(
+                    "no comments",
+                    function()
+                        local chess = Chess()
+                        assert.is.falsy(chess.get_comment())
+                        assert.are.same(chess.get_comments(), {})
+                        chess.move("e4")
+                        assert.is.falsy(chess.get_comment())
+                        assert.are.same(chess.get_comments(), {})
+                        assert.are.equals("1. e4", chess.pgn())
+                    end
+            )
+
+            it(
+                    "comment for initial position",
+                    function()
+                        local chess = Chess()
+                        chess.set_comment("starting position")
+                        assert.are.equals("starting position", chess.get_comment())
+                        assert.are.same(chess.get_comments(), { { fen = chess.fen(), comment = "starting position" } })
+                        assert.are.equals("{starting position}", chess.pgn())
+                    end
+            )
+
+            it(
+                    "comment for first move",
+                    function()
+                        local chess = Chess()
+                        chess.move("e4")
+                        local e4 = chess.fen()
+                        chess.set_comment("good move")
+                        assert.are.equals("good move", chess.get_comment())
+                        assert.are.same({ { fen = e4, comment = "good move" } }, chess.get_comments())
+                        chess.move("e5")
+                        assert.is.falsy(chess.get_comment())
+                        assert.are.same({ { fen = e4, comment = "good move" } }, chess.get_comments())
+                        assert.are.equals("1. e4 {good move} e5", chess.pgn())
+                    end
+            )
+
+            it(
+                    "comment for last move",
+                    function()
+                        local chess = Chess()
+                        chess.move("e4")
+                        chess.move("e6")
+                        chess.set_comment("dubious move")
+                        assert.are.equals("dubious move", chess.get_comment())
+                        assert.are.same({ { fen = chess.fen(), comment = "dubious move" } }, chess.get_comments())
+                        assert.are.equals("1. e4 e6 {dubious move}", chess.pgn())
+                    end
+            )
+
+            it(
+                    "comment with brackets",
+                    function()
+                        local chess = Chess()
+                        chess.set_comment("{starting position}")
+                        assert.are.equals("[starting position]", chess.get_comment())
+                    end
+            )
+
+            it(
+                    "comments for everything",
+                    function()
+                        local chess = Chess()
+
+                        local initial = chess.fen()
+                        chess.set_comment("starting position")
+                        assert.are.equals("starting position", chess.get_comment())
+                        assert.are.same({ { fen = initial, comment = "starting position" } }, chess.get_comments())
+                        assert.are.equals("{starting position}", chess.pgn())
+
+                        chess.move("e4")
+                        local e4 = chess.fen()
+                        chess.set_comment("good move")
+                        assert.are.equals("good move", chess.get_comment())
+                        assert.are.same(
+                                {
+                                    { fen = initial, comment = "starting position" },
+                                    { fen = e4, comment = "good move" }
+                                },
+                                chess.get_comments()
+                        )
+                        assert.are.equals("{starting position} 1. e4 {good move}", chess.pgn())
+
+                        chess.move("e6")
+                        local e6 = chess.fen()
+                        chess.set_comment("dubious move")
+                        assert.are.equals("dubious move", chess.get_comment())
+                        assert.are.same(
+                                {
+                                    { fen = initial, comment = "starting position" },
+                                    { fen = e4, comment = "good move" },
+                                    { fen = e6, comment = "dubious move" }
+                                },
+                                chess.get_comments()
+                        )
+                        assert.are.equals("{starting position} 1. e4 {good move} e6 {dubious move}", chess.pgn())
+                    end
+            )
+
+            it(
+                    "delete comments",
+                    function()
+                        local chess = Chess()
+                        assert.is.falsy(chess.delete_comment())
+                        assert.are.same({}, chess.delete_comments())
+                        local initial = chess.fen()
+                        chess.set_comment("starting position")
+                        chess.move("e4")
+                        local e4 = chess.fen()
+                        chess.set_comment("good move")
+                        chess.move("e6")
+                        local e6 = chess.fen()
+                        chess.set_comment("dubious move")
+                        assert.are.same(
+                                {
+                                    { fen = initial, comment = "starting position" },
+                                    { fen = e4, comment = "good move" },
+                                    { fen = e6, comment = "dubious move" }
+                                },
+                                chess.get_comments()
+                        )
+                        assert.are.equals("dubious move", chess.delete_comment())
+                        assert.are.equals("{starting position} 1. e4 {good move} e6", chess.pgn())
+                        assert.is.falsy(chess.delete_comment())
+                        assert.are.same(
+                                {
+                                    { fen = initial, comment = "starting position" },
+                                    { fen = e4, comment = "good move" }
+                                },
+                                chess.delete_comments()
+                        )
+                        assert.are.equals("1. e4 e6", chess.pgn())
+                    end
+            )
+
+            it(
+                    "prune comments",
+                    function()
+                        local chess = Chess()
+                        chess.move("e4")
+                        chess.set_comment("tactical")
+                        chess.undo()
+                        chess.move("d4")
+                        chess.set_comment("positional")
+                        assert.are.same({ { fen = chess.fen(), comment = "positional" } }, chess.get_comments())
+                        assert.are.equals("1. d4 {positional}", chess.pgn())
+                    end
+            )
+
+            it(
+                    "clear comments",
+                    function()
+                        local test = function(fn)
+                            local chess = Chess()
+                            chess.move("e4")
+                            chess.set_comment("good move")
+                            assert.are.same({ { fen = chess.fen(), comment = "good move" } }, chess.get_comments())
+                            fn(chess)
+                            assert.are.same({}, chess.get_comments())
+                        end
+                        test(
+                                function(chess)
+                                    chess.reset()
+                                end
+                        )
+                        test(
+                                function(chess)
+                                    chess.clear()
+                                end
+                        )
+                        test(
+                                function(chess)
+                                    chess.load(chess.fen())
+                                end
+                        )
+                        test(
+                                function(chess)
+                                    chess.load_pgn("1. e4")
+                                end
+                        )
+                    end
+            )
+        end
+)
+
+describe(
+        "Format Comments #fmtcmts",
+        function()
+            it(
+                    "wrap comments",
+                    function()
+                        local chess = Chess()
+                        chess.move("e4")
+                        chess.set_comment("good   move")
+                        chess.move("e5")
+                        chess.set_comment("classical response")
+                        assert.are.equals("1. e4 {good   move} e5 {classical response}", chess.pgn())
+                        assert.are.same(
+                                table.concat(
+                                        {
+                                            "1. e4 {good",
+                                            "move} e5",
+                                            "{classical",
+                                            "response}"
+                                        },
+                                        "\n"
+                                ),
+                                chess.pgn({ max_width = 16 })
+                        )
+                        assert.are.equals(
+                                table.concat(
+                                        {
+                                            "1.",
+                                            "e4",
+                                            "{good",
+                                            "move}",
+                                            "e5",
+                                            "{classical",
+                                            "response}"
+                                        },
+                                        "\n"
+                                ),
+                                chess.pgn({ max_width = 2 })
+                        )
+                    end
+            )
+        end
+)
+
+describe(
+        "Load Comments #ldcmts",
+        function()
+            local tests = {
+                {
+                    name = "bracket comments",
+                    input = "1. e4 {good move} e5 {classical response}",
+                    output = "1. e4 {good move} e5 {classical response}"
+                },
+                {
+                    name = "semicolon comments",
+                    input = "1. e4 e5; romantic era\n 2. Nf3 Nc6; common continuation",
+                    output = "1. e4 e5 {romantic era} 2. Nf3 Nc6 {common continuation}"
+                },
+                {
+                    name = "bracket and semicolon comments",
+                    input = "1. e4 {good!} e5; standard response\n 2. Nf3 Nc6 {common}",
+                    output = "1. e4 {good!} e5 {standard response} 2. Nf3 Nc6 {common}"
+                },
+                {
+                    name = "bracket comments with newlines",
+                    input = "1. e4 {good\nmove} e5 {classical\nresponse}",
+                    output = "1. e4 {good move} e5 {classical response}"
+                },
+                {
+                    name = "initial comment",
+                    input = "{ great game }\n1. e4 e5",
+                    output = "{ great game } 1. e4 e5"
+                },
+                {
+                    name = "empty bracket comment",
+                    input = "1. e4 {}",
+                    output = "1. e4 {}"
+                },
+                {
+                    name = "empty semicolon comment",
+                    input = "1. e4;\ne5",
+                    output = "1. e4 {} e5"
+                },
+                {
+                    name = "unicode comment",
+                    input = "1. e4 {Δ, Й, ק ,م, ๗, あ, 叶, 葉, and 말}",
+                    output = "1. e4 {Δ, Й, ק ,م, ๗, あ, 叶, 葉, and 말}"
+                },
+                {
+                    name = "semicolon in bracket comment",
+                    input = "1. e4 { a classic; well-studied } e5",
+                    output = "1. e4 { a classic; well-studied } e5"
+                },
+                {
+                    name = "bracket in semicolon comment",
+                    input = "1. e4 e5 ; a classic {well-studied}",
+                    output = "1. e4 e5 {a classic {well-studied}}"
+                },
+                {
+                    name = "markers in bracket comment",
+                    input = "1. e4 e5 {($1) 1. e4 is good}",
+                    output = "1. e4 e5 {($1) 1. e4 is good}"
+                },
+                {
+                    name = "markers in semicolon comment",
+                    input = "1. e4 e5; ($1) 1. e4 is good",
+                    output = "1. e4 e5 {($1) 1. e4 is good}"
+                }
+            }
+
+            forEach(
+                    tests,
+                    function(test)
+                        it(
+                                string.format("load %s", test.name),
+                                function()
+                                    local chess = Chess()
+                                    chess.load_pgn(test.input)
+                                    assert.are.equals(test.output, chess.pgn())
+                                end
+                        )
+                    end
+            )
+        end
+)
+
 describe("Make Move #mkmove", function()
 
     local positions = {
@@ -1220,6 +1545,37 @@ describe('Board Tests #board', function()
             local chess = Chess(test.fen)
             assert.are.same(test.board, chess.board())
         end)
+    end)
+end)
+
+describe('Parse PGN Headers', function()
+    it('Github Issue #191 - whitespace before closing bracket', function()
+        local pgn = {
+            '[Event "Reykjavik WCh"]',
+            '[Site "Reykjavik WCh"]',
+            '[Date "1972.01.07" ]',
+            '[EventDate "?"]',
+            '[Round "6"]',
+            '[Result "1-0"]',
+            '[White "Robert James Fischer"]',
+            '[Black "Boris Spassky"]',
+            '[ECO "D59"]',
+            '[WhiteElo "?"]',
+            '[BlackElo "?"]',
+            '[PlyCount "81"]',
+            '',
+            '1. c4 e6 2. Nf3 d5 3. d4 Nf6 4. Nc3 Be7 5. Bg5 O-O 6. e3 h6',
+            '7. Bh4 b6 8. cxd5 Nxd5 9. Bxe7 Qxe7 10. Nxd5 exd5 11. Rc1 Be6',
+            '12. Qa4 c5 13. Qa3 Rc8 14. Bb5 a6 15. dxc5 bxc5 16. O-O Ra7',
+            '17. Be2 Nd7 18. Nd4 Qf8 19. Nxe6 fxe6 20. e4 d4 21. f4 Qe7',
+            '22. e5 Rb8 23. Bc4 Kh8 24. Qh3 Nf8 25. b3 a5 26. f5 exf5',
+            '27. Rxf5 Nh7 28. Rcf1 Qd8 29. Qg3 Re7 30. h4 Rbb7 31. e6 Rbc7',
+            '32. Qe5 Qe8 33. a4 Qd8 34. R1f2 Qe8 35. R2f3 Qd8 36. Bd3 Qe8',
+            '37. Qe4 Nf6 38. Rxf6 gxf6 39. Rxf6 Kg8 40. Bc4 Kh8 41. Qf4 1-0'
+        }
+        local chess = Chess()
+        chess.load_pgn(table.concat(pgn, '\n'))
+        assert.are.equals('1972.01.07', chess.header()['Date'])
     end)
 end)
 

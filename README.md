@@ -2,7 +2,7 @@
 
 - A basic chess library ported from https://github.com/jhlywa/chess.js
 - Without chess engine.
-- For lua5.1, it is recommended to use extra bit manipulation library to improve performance
+- For lua5.1, it is recommended to use extra bit manipulation library to improve performance.
 
 ## Example
 

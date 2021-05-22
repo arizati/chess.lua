@@ -171,7 +171,7 @@ end
 local function clone(obj)
     local function _copy(org, res)
         for k, v in pairs(org) do
-            if type(v) ~= "table" then
+            if type(v) ~= 'table' then
                 res[k] = v
             else
                 res[k] = {}
@@ -365,17 +365,23 @@ local function ctor(_m, start_fen)
     local self_history = {} --array
     local self_header = {}
     local self_header_keys = {} --array, used to guarantee the order
+    local self_comments = {}
+    local self_comments_keys = {} --array, used to guarantee the order
     -------------------------------------------------
 
     local function clear_header()
         self_header_keys = {}
         self_header = {}
     end
+    --local function clear_comments()
+    --    self_comments_keys = {}
+    --    self_comments = {}
+    --end
 
     local function remove_header(k)
         if self_header[k] then
             self_header[k] = nil
-            remove_header(k)
+            --remove_header(k)
             local p
             for i, v in ipairs(self_header_keys) do
                 if v == k then
@@ -398,6 +404,32 @@ local function ctor(_m, start_fen)
         table.insert(self_header_keys, k)
     end
 
+    local function remove_comment(k)
+        if self_comments[k] then
+            self_comments[k] = nil
+            --remove_comment(k)
+            local p
+            for i, v in ipairs(self_comments_keys) do
+                if v == k then
+                    p = i
+                    break
+                end
+            end
+            if p then
+                table.remove(self_comments_keys, p)
+            end
+        end
+    end
+
+    local function add_comment(k, v)
+        --assert(k and v)
+        if self_comments[k] then
+            remove_comment(k)
+        end
+        self_comments[k] = v
+        table.insert(self_comments_keys, k)
+        --print("Add Comment", k, v)
+    end
 
     -- called when the initial board setup is changed with put() or remove().
     -- modifies the SetUp and FEN properties of the header object.  if the FEN is
@@ -527,6 +559,8 @@ local function ctor(_m, start_fen)
             --self_header = {}
             clear_header()
         end
+        self_comments = {}
+        self_comments_keys = {}
         update_setup(generate_fen())
     end
 
@@ -878,6 +912,30 @@ local function ctor(_m, start_fen)
         end
 
         return move
+    end
+
+    local function prune_comments()
+        local reversed_history = {}
+        local current_comments = {}
+        local current_comments_keys = {}
+        local copy_comment = function(fen)
+            local cmt = self_comments[fen]
+            if cmt then
+                current_comments[fen] = cmt
+                table.insert(current_comments_keys, fen)
+            end
+        end
+        while #self_history > 0 do
+            table.insert(reversed_history, undo_move())
+        end
+        copy_comment(generate_fen())
+        for i = #reversed_history, 1, -1 do
+            make_move(reversed_history[i])
+            --reversed_history[i] = nil
+            copy_comment(generate_fen())
+        end
+        self_comments = current_comments
+        self_comments_keys = current_comments_keys
     end
 
     -----
@@ -1487,6 +1545,15 @@ local function ctor(_m, start_fen)
                 table.insert(result, newline)
             end
 
+            local append_comment = function(move_string)
+                local comment = self_comments[generate_fen()]
+                if comment then
+                    local delimiter = #move_string > 0 and ' ' or ''
+                    move_string = string.format("%s%s{%s}", move_string, delimiter, comment)
+                end
+                return move_string
+            end
+
             -- pop all of history onto reversed_history
             local reversed_history = {} --array
             while #self_history > 0 do
@@ -1496,8 +1563,14 @@ local function ctor(_m, start_fen)
             local moves = {} --array
             local move_string_buffer = ''
 
+            -- special case of a commented starting position with no moves
+            if #reversed_history <= 0 then
+                table.insert(moves, append_comment(''))
+            end
+
             -- build the list of moves.  a move_string looks like: "3. e3 e6"
             for i = #reversed_history, 1, -1 do
+                move_string_buffer = append_comment(move_string_buffer)
                 local move = reversed_history[i]
 
                 -- if the position started with black to move, start PGN with 1. ...
@@ -1518,7 +1591,7 @@ local function ctor(_m, start_fen)
 
             -- are there any other leftover moves?
             if #move_string_buffer > 0 then
-                table.insert(moves, move_string_buffer)
+                table.insert(moves, append_comment(move_string_buffer))
             end
 
             -- is there a result?
@@ -1526,34 +1599,71 @@ local function ctor(_m, start_fen)
                 table.insert(moves, self_header.Result)
             end
 
-            -- history should be back to what is was before we started generating PGN,
+            -- history should be back to what it was before we started generating PGN,
             -- so join together moves
             if max_width == 0 then
                 return table.concat(result, '') .. table.concat(moves, ' ')
+            end
+
+            local strip = function()
+                local len = #result
+                if len > 0 and result[len] == " " then
+                    result[len] = nil
+                    return true
+                end
+                return false
+            end
+
+            -- NB: this does not preserve comment whitespace.
+            local wrap_comment = function(width, move)
+                for _, token in ipairs(str_split(move, ' ')) do
+                    if token ~= "" then
+                        if width + #token > max_width then
+                            while strip() do
+                                width = width - 1
+                            end
+                            table.insert(result, newline)
+                            width = 0
+                        end
+                        table.insert(result, token)
+                        width = width + #token
+                        table.insert(result, ' ')
+                        width = width + 1
+                    end
+                end
+                if strip() then
+                    width = width - 1
+                end
+                return width
             end
 
             -- wrap the PGN output at max_width
             local current_width = 0
             for i, m in ipairs(moves) do
                 local m_len = #m
-                -- if the current move will push past max_width
-                if current_width + m_len > max_width and i ~= 1 then
-                    -- don't end the line with whitespace
-                    local result_len = #result
-                    if result[result_len] == ' ' then
-                        table.remove(result, result_len)
+                if current_width + m_len > max_width and m:find('{') then
+                    --(moves[i].includes('{')) then
+                    current_width = wrap_comment(current_width, m)
+                else
+                    -- if the current move will push past max_width
+                    if current_width + m_len > max_width and i ~= 1 then
+                        -- don't end the line with whitespace
+                        local result_len = #result
+                        if result[result_len] == ' ' then
+                            table.remove(result, result_len)
+                        end
+                        table.insert(result, newline)
+                        current_width = 0
+                    elseif i ~= 1 then
+                        table.insert(result, ' ')
+                        current_width = current_width + 1
                     end
-                    table.insert(result, newline)
-                    current_width = 0
-                elseif i ~= 1 then
-                    table.insert(result, ' ')
-                    current_width = current_width + 1
+                    table.insert(result, m)
+                    current_width = current_width + m_len
                 end
-                table.insert(result, m)
-                current_width = current_width + m_len
             end
 
-            return table.concat(result)
+            return table.concat(result, "")
         end,
         load_pgn = function(pgn, options)
             -- allow the user to specify the sloppy move parser to work around over
@@ -1609,7 +1719,7 @@ local function ctor(_m, start_fen)
 
                 for _, h in ipairs(headers) do
                     key = h:gsub('^%[([A-Z][A-Za-z]*)%s.*%]$', '%1')
-                    value = h:gsub('^%[[A-Za-z]+%s"(.*)"%]$', '%1')
+                    value = h:gsub('^%[[A-Za-z]+%s"(.*)"%s*%]$', '%1')
                     if #trim(key) > 0 then
                         header_obj[key] = value
                     end
@@ -1646,13 +1756,72 @@ local function ctor(_m, start_fen)
                 end
             end
 
+            -- NB: the regexes below that delete move numbers, recursive
+            -- annotations, and numeric annotation glyphs may also match
+            -- text in comments. To prevent this, we transform comments
+            -- by encoding them in place and decoding them again after
+            -- the other tokens have been deleted.
+            local do_encode = function(str)
+                return str:gsub(
+                        ".",
+                        function(c)
+                            return "\\" .. c:byte()
+                        end
+                )
+            end
+
+            local do_decode = function(str)
+                if #str == 0 then
+                    return ""
+                end
+                local chars = split(str, "\\")
+                local buffer = {}
+                for i = 1, #chars do
+                    local c = tonumber(chars[i])
+                    if c and c <= 255 and c >= 0 then
+                        table.insert(buffer, string.char(c))
+                    else
+                        print("Error Decoding comments", str, i, c)
+                    end
+                end
+                return table.concat(buffer)
+            end
+
+            local decode_comment = function(str)
+                if str:sub(1, 1) == "{" and str:sub(-1, -1) == "}" then
+                    return do_decode(str:sub(2, -2))
+                end
+            end
+
+            local decode_comment_with_bracket = function(str)
+                local ret = decode_comment(str)
+                if ret then return ('{%s}'):format(ret) end
+            end
+
             -- delete header to get the moves
             local ms = header_string ~= '' and split_pgn[2] or split_pgn[1]
+
+            -- /(\{[^}]*\})+?/g
+            ms = ms:gsub('%b{}', function(match)
+                match = match:gsub(newline_char, ' ')
+                return ("{%s}"):format(do_encode(match:sub(2, -2)))
+            end)
+
+            -- /;([^${mask(newline_char)}]*)/g
+            local semicolon_replace_fn = function(match)
+                return ' ' .. ("{%s}"):format(do_encode(match:gsub('%b{}', decode_comment_with_bracket)))
+            end
+            if newline_char == '\r?\n' then
+                ms = ms:gsub("; *([^\r\n]*)", semicolon_replace_fn)
+            else
+                ms = ms:gsub(("; *([^%s]*)"):format(newline_char), semicolon_replace_fn)
+            end
+
             ms = ms:gsub(newline_char, ' ')
 
             -- delete comments
             -- /(\{[^}]+\})+?/g
-            ms = ms:gsub('%b{}', '') --???
+            --ms = ms:gsub('%b{}', '') --???
 
             -- delete recursive annotation variations
             -- /(\([^\(\)]+\))+?/g
@@ -1676,20 +1845,33 @@ local function ctor(_m, start_fen)
 
             local move
             local moves_len = #moves
+            local comment
             for hm = 1, moves_len - 1 do
-                move = move_from_san(moves[hm], sloppy)
-
-                -- move not possible! (don't clear the board to examine to show the
-                -- latest valid position)
-                if not move then
-                    return false
+                comment = decode_comment(moves[hm])
+                if comment then
+                    add_comment(generate_fen(), comment)
+                    --continue
                 else
-                    make_move(move)
+                    move = move_from_san(moves[hm], sloppy)
+
+                    -- move not possible! (don't clear the board to examine to show the
+                    -- latest valid position)
+                    if not move then
+                        return false
+                    else
+                        make_move(move)
+                    end
                 end
             end
 
+            comment = decode_comment(moves[moves_len])
+            if comment then
+                add_comment(generate_fen(), comment)
+                moves[moves_len] = nil
+            end
+
             -- examine last move
-            move = moves[moves_len]
+            move = moves[#moves]
 
             local results_test = {}
             for _, r in ipairs(POSSIBLE_RESULTS) do
@@ -1795,6 +1977,37 @@ local function ctor(_m, start_fen)
             end
 
             return move_history
+        end,
+        get_comment = function()
+            return self_comments[generate_fen()]
+        end,
+        set_comment = function(comment)
+            add_comment(generate_fen(), comment:gsub('{', '['):gsub('}', ']'))
+        end,
+        delete_comment = function()
+            local comment = self_comments[generate_fen()]
+            remove_comment(generate_fen())
+            return comment
+        end,
+        get_comments = function()
+            prune_comments();
+            local ret = {}
+            for _, fen in ipairs(self_comments_keys) do
+                table.insert(ret, { fen = fen, comment = self_comments[fen] })
+            end
+            return ret
+        end,
+        delete_comments = function()
+            prune_comments()
+            local ret = {}
+            for _, fen in ipairs(self_comments_keys) do
+                table.insert(ret, { fen = fen, comment = self_comments[fen] })
+            end
+
+            for _, v in ipairs(ret) do
+                remove_comment(v.fen)
+            end
+            return ret
         end
     }
     setmetatable(obj, _m)
