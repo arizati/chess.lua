@@ -167,7 +167,7 @@ local function is_digit(c)
     -- return ('0123456789').indexOf(c) ~= -1
 end
 
---- just copy
+-- just copy
 local function clone(obj)
     local function _copy(org, res)
         for k, v in pairs(org) do
@@ -1051,22 +1051,22 @@ local function ctor(_m, start_fen)
         return move
     end
 
-    local function generate_moves(options)
-        --: array
-        local function add_move(board, moves, from, to, flags)
-            --board は、self_board です
-            -- if pawn promotion --!!!
-            if board[from + 1].type == PAWN and (rank(to) == RANK_8 or rank(to) == RANK_1) then
-                local pieces = { QUEEN, ROOK, BISHOP, KNIGHT } --array<string>
-                for _, p in ipairs(pieces) do
-                    table.insert(moves, build_move(board, from, to, flags, p))
-                end
-            else
-                table.insert(moves, build_move(board, from, to, flags))
+    --: array
+    local function add_move(board, moves, from, to, flags)
+        --board は、self_board です
+        -- if pawn promotion --!!!
+        if board[from + 1].type == PAWN and (rank(to) == RANK_8 or rank(to) == RANK_1) then
+            local pieces = { QUEEN, ROOK, BISHOP, KNIGHT } --array<string>
+            for _, p in ipairs(pieces) do
+                table.insert(moves, build_move(board, from, to, flags, p))
             end
-            -- return moves
+        else
+            table.insert(moves, build_move(board, from, to, flags))
         end
+        -- return moves
+    end
 
+    local function generate_moves(options)
         local moves = {} --array
         local us = self_turn
         local them = swap_color(us)
@@ -1078,11 +1078,16 @@ local function ctor(_m, start_fen)
 
         -- do we want legal moves?
         local legal = true
+        local piece_type = true
 
         if type(options) == 'table' then
             if options.legal ~= nil then
                 legal = options.legal
             end
+            if type(options.piece) == 'string' then
+                piece_type = options.piece:lower()
+            end
+
             -- are we generating moves for a single square?
             local opt_sq = options.square
             if opt_sq ~= nil then
@@ -1108,7 +1113,7 @@ local function ctor(_m, start_fen)
                 local piece = self_board[idx] --!!!
                 if piece and piece.color == us then
 
-                    if piece.type == PAWN then
+                    if piece.type == PAWN and (piece_type == true or piece_type == PAWN) then
                         local PAWN_OFFSETS_us = PAWN_OFFSETS[us]
                         -- single square, non-capturingy
                         local square = i + PAWN_OFFSETS_us[1] --!!!
@@ -1136,7 +1141,7 @@ local function ctor(_m, start_fen)
                                 end
                             end
                         end
-                    else
+                    elseif piece_type == true or piece_type == piece.type then
                         local offsets = PIECE_OFFSETS[piece.type]
                         for _, offset in ipairs(offsets) do
                             --!!!
@@ -1166,7 +1171,7 @@ local function ctor(_m, start_fen)
 
         -- check for castling if: a) we're generating all moves, or b) we're doing
         -- single square move generation on the king's square
-        if not single_square or last_sq == self_kings[us] then
+        if (piece_type == true or piece_type == KING) and (not single_square or last_sq == self_kings[us]) then
             -- king-side castling
             if bit.band(self_castling[us], BITS.KSIDE_CASTLE) ~= 0 then
                 local castling_from = self_kings[us]
@@ -1238,8 +1243,8 @@ local function ctor(_m, start_fen)
     end
 
     -- this function is used to uniquely identify ambiguous moves
-    local function get_disambiguator(move, sloppy)
-        local moves = generate_moves({ legal = not sloppy }) --array
+    local function get_disambiguator(move, moves)
+        --local moves = generate_moves({ legal = not sloppy }) --array
 
         local from = move.from
         local to = move.to
@@ -1299,7 +1304,7 @@ local function ctor(_m, start_fen)
     -- r1bqkbnr/ppp2ppp/2n5/1B1pP3/4P3/8/PPPP2PP/RNBQK1NR b KQkq - 2 4
     -- 4. ... Nge7 is overly disambiguated because the knight on c6 is pinned
     -- 4. ... Ne7 is technically the valid SAN
-    local function move_to_san(move, sloppy)
+    local function move_to_san(move, moves)
         local output = ''
 
         local move_flags = move.flags -- or 0 --???
@@ -1308,9 +1313,10 @@ local function ctor(_m, start_fen)
         elseif bit.band(move_flags, BITS.QSIDE_CASTLE) ~= 0 then
             output = 'O-O-O'
         else
-            local disambiguator = get_disambiguator(move, sloppy)
+            --local disambiguator = get_disambiguator(move, sloppy)
             local move_piece = move.piece
             if move_piece ~= PAWN then
+                local disambiguator = get_disambiguator(move, moves)
                 output = output .. move_piece:upper() .. disambiguator
             end
 
@@ -1342,6 +1348,21 @@ local function ctor(_m, start_fen)
     end
 
     -------------------------------------------------
+    local function infer_piece_type(san)
+        local piece_type = san:sub(1, 1)
+        if piece_type >= 'a' and piece_type <= 'h' then
+            --local matches = san.match("/[a-h]\d.*[a-h]\d/")
+            if san:find('[a-h]%d.*[a-h]%d') then
+                return
+            end
+            return PAWN
+        end
+        piece_type = piece_type:lower()
+        if piece_type == 'o' then
+            return KING
+        end
+        return piece_type
+    end
     -- convert a move from Standard Algebraic Notation (SAN) to 0x88 coordinates
     local function move_from_san(move, sloppy)
         -- strip off any move decorations: e.g Nf3+?!
@@ -1354,13 +1375,27 @@ local function ctor(_m, start_fen)
             piece, from, to, promotion = clean_move:match("([pnbrqkPNBRQK]?)([a-h][1-8])x?%-?([a-h][1-8])([qrbnQRBN]?)")
         end
 
-        local moves = generate_moves() --array
+        local piece_type = infer_piece_type(clean_move)
+        local moves
+        local legalMoves = generate_moves({
+            legal = true,
+            piece = piece ~= '' and piece or piece_type,
+        })
+        moves = legalMoves
+        local illegalMoves
+        if sloppy then
+            illegalMoves = generate_moves({
+                legal = false,
+                piece = piece ~= '' and piece or piece_type,
+            })
+            moves = illegalMoves
+        end
 
         for _, v in ipairs(moves) do
-
             -- try the strict parser first, then the sloppy parser if requested
             -- by the user
-            if (clean_move == stripped_san(move_to_san(v))) or (sloppy and clean_move == stripped_san(move_to_san(v, true)))
+            if (clean_move == stripped_san(move_to_san(v, legalMoves)))
+                    or (sloppy and clean_move == stripped_san(move_to_san(v, illegalMoves)))
             then
                 return v
             else
@@ -1382,7 +1417,7 @@ local function ctor(_m, start_fen)
     --- pretty = external move object
     local function make_pretty(ugly_move)
         local move = clone(ugly_move)
-        move.san = move_to_san(move, false)
+        move.san = move_to_san(move, generate_moves({ legal = true }))
         move.to = algebraic(move.to)
         move.from = algebraic(move.from)
 
@@ -1450,7 +1485,7 @@ local function ctor(_m, start_fen)
                 if options and options.verbose then
                     table.insert(moves, make_pretty(um))
                 else
-                    table.insert(moves, move_to_san(um, false))
+                    table.insert(moves, move_to_san(um, generate_moves({ legal = true })))
                 end
             end
             return moves
@@ -1584,7 +1619,7 @@ local function ctor(_m, start_fen)
                     move_string_buffer = self_move_number .. '.'
                 end
 
-                move_string_buffer = string.format('%s %s', move_string_buffer, move_to_san(move, false))
+                move_string_buffer = string.format('%s %s', move_string_buffer, move_to_san(move, generate_moves({ legal = false })))
 
                 make_move(move)
             end
@@ -1971,7 +2006,7 @@ local function ctor(_m, start_fen)
                 if verbose then
                     table.insert(move_history, make_pretty(move))
                 else
-                    table.insert(move_history, move_to_san(move))
+                    table.insert(move_history, move_to_san(move, generate_moves({ legal = true })))
                 end
                 make_move(move)
             end
