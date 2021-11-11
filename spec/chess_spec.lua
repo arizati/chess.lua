@@ -89,7 +89,6 @@ describe("Single Square Move Generation #movegen", function()
 end)
 
 describe("Checkmate #check", function()
-    local chess = Chess()
     local checkmates = {
         '8/5r2/4K1q1/4p3/3k4/8/8/8 w - - 0 7',
         '4r2r/p6p/1pnN2p1/kQp5/3pPq2/3P4/PPP3PP/R5K1 b - - 0 2',
@@ -97,11 +96,23 @@ describe("Checkmate #check", function()
         '8/6R1/pp1r3p/6p1/P3R1Pk/1P4P1/7K/8 b - - 0 4'
     }
 
-    forEach(checkmates, function(checkmate)
-        chess.load(checkmate) --!!!
-
-        it(checkmate, function()
+    forEach(checkmates, function(fen)
+        local chess = Chess(fen)
+        it("should detect checkmate", function()
             assert.True(chess.in_checkmate())
+            assert.False(chess.in_draw())
+        end)
+    end)
+
+    local noCheckmates = {
+        'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+        '1R6/8/8/8/8/8/7R/k6K b - - 0 1' -- stalemate
+    }
+
+    forEach(noCheckmates, function(fen)
+        local chess = Chess(fen)
+        it('should detect no checkmate', function()
+            assert.False(chess.in_checkmate())
         end)
     end)
 
@@ -113,43 +124,47 @@ describe("Stalemate #stale", function()
         '8/8/5k2/p4p1p/P4K1P/1r6/8/8 w - - 0 2',
     }
 
-    forEach(stalemates, function(stalemate)
-        local chess = Chess()
-        chess.load(stalemate)
-
-        it(stalemate, function()
+    forEach(stalemates, function(fen)
+        local chess = Chess(fen)
+        it("should detect stalemate", function()
             assert.True(chess.in_stalemate())
+            assert.True(chess.in_draw())
         end)
     end)
 
 end)
 
 describe("Insufficient Material #insm", function()
-    local positions = {
-        { fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', draw = false },
-        { fen = '8/8/8/8/8/8/8/k6K w - - 0 1', draw = true },
-        { fen = '8/2p5/8/8/8/8/8/k6K w - - 0 1', draw = false },
-        { fen = '8/2N5/8/8/8/8/8/k6K w - - 0 1', draw = true },
-        { fen = '8/2b5/8/8/8/8/8/k6K w - - 0 1', draw = true },
-        { fen = '8/b7/3B4/8/8/8/8/k6K w - - 0 1', draw = true },
-        { fen = '8/b7/B7/8/8/8/8/k6K w - - 0 1', draw = false },
-        { fen = '8/b1B1b1B1/1b1B1b1B/8/8/8/8/1k5K w - - 0 1', draw = true },
-        { fen = '8/bB2b1B1/1b1B1b1B/8/8/8/8/1k5K w - - 0 1', draw = false }
+    local drawn = {
+        "8/8/8/8/8/8/8/k6K w - - 0 1",
+        "8/2N5/8/8/8/8/8/k6K w - - 0 1",
+        "8/2b5/8/8/8/8/8/k6K w - - 0 1",
+        "8/b7/3B4/8/8/8/8/k6K w - - 0 1",
+        "8/b1B1b1B1/1b1B1b1B/8/8/8/8/1k5K w - - 0 1",
     }
 
-    forEach(positions, function(position)
-        local chess = Chess()
-        chess.load(position.fen)
+    local notDrawn = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "8/2p5/8/8/8/8/8/k6K w - - 0 1",
+        "8/b7/B7/8/8/8/8/k6K w - - 0 1",
+        "8/bB2b1B1/1b1B1b1B/8/8/8/8/1k5K w - - 0 1"
+    }
 
-        it(position.fen, function()
-            if position.draw then
-                assert.is_true(chess.insufficient_material() and chess.in_draw())
-            else
-                assert.is_true(not chess.insufficient_material() and not chess.in_draw())
-            end
+    forEach(drawn, function(fen)
+        local chess = Chess(fen)
+        it("should be drawn - " .. fen, function()
+            assert.True(chess.insufficient_material())
+            assert.True(chess.in_draw())
         end)
     end)
 
+    forEach(notDrawn, function(fen)
+        local chess = Chess(fen)
+        it("should not be drawn - " .. fen, function()
+            assert.False(chess.insufficient_material())
+            assert.False(chess.in_draw())
+        end)
+    end)
 end)
 
 describe("Threefold Repetition #3rep", function()
@@ -164,26 +179,21 @@ describe("Threefold Repetition #3rep", function()
     }
 
     forEach(positions, function(position)
-        local chess = Chess()
-        chess.load(position.fen)
+        local chess = Chess(position.fen)
 
-        it(position.fen, function()
-            local passed = true
-            for j = 1, #position.moves do
-                if chess.in_threefold_repetition() then
-                    passed = false
-                    break
-                end
-                chess.move(position.moves[j])
-            end
-
-            assert.is_true(passed and chess.in_threefold_repetition() and chess.in_draw())
+        it("should be drawn - " .. position.fen, function()
+            forEach(position.moves, function(move)
+                assert.False(chess.in_threefold_repetition())
+                chess.move(move)
+            end)
+            assert.True(chess.in_threefold_repetition())
+            assert.True(chess.in_draw())
         end)
     end)
 
 end)
 
-describe("Algebraic Notation #algebraic", function()
+describe("Algebraic Notation #an", function()
     local positions = {
         { fen = '7k/3R4/3p2Q1/6Q1/2N1N3/8/8/3R3K w - - 0 1',
           moves = { 'Rd8#', 'Re7', 'Rf7', 'Rg7', 'Rh7#', 'R7xd6', 'Rc7', 'Rb7', 'Ra7',
@@ -223,29 +233,18 @@ describe("Algebraic Notation #algebraic", function()
     }
 
     forEach(positions, function(position)
-        local chess = Chess()
-        local passed = true
-        chess.load(position.fen)
-
-        it(position.fen, function()
-            local moves = chess.moves()
-            local expect = position.moves
-
-            if #moves ~= #expect then
-                passed = false
-            else
-                forEach(expect, function(v)
-                    passed = table.contains(moves, v)
-                end)
-            end
-            assert.is_true(passed)
+        local chess = Chess(position.fen)
+        it("should generate Standard Algebraic Notation - " .. position.fen, function()
+            -- use table.sort() to ignore the order in which the moves appear in the move list
+            local moves = table.sort(chess.moves())
+            local expect = table.sort(position.moves)
+            assert.are.same(moves, expect)
         end)
-
     end)
-
 end)
 
 describe("Get/Put/Remove #get #put #remove", function()
+
     local chess = Chess()
     local passed = true
     local positions = {
@@ -346,40 +345,45 @@ end)
 
 describe("FEN #fen", function()
 
-    local positions = {
-        { fen = '8/8/8/8/8/8/8/8 w - - 0 1', should_pass = true },
-        { fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', should_pass = true },
-        { fen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', should_pass = true },
-        { fen = '1nbqkbn1/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/1NBQKBN1 b - - 1 2', should_pass = true },
-
-        -- incomplete FEN string
-        { fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBN w KQkq - 0 1', should_pass = false },
-
-        -- bad digit (9)
-        { fen = 'rnbqkbnr/pppppppp/9/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', should_pass = false },
-
-        -- bad piece (X)
-        { fen = '1nbqkbn1/pppp1ppX/8/4p3/4P3/8/PPPP1PPP/1NBQKBN1 b - - 1 2', should_pass = false },
+    local validPositions = {
+        "8/8/8/8/8/8/8/8 w - - 0 1",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+        "1nbqkbn1/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/1NBQKBN1 b - - 1 2",
     }
 
-    forEach(positions, function(position)
-        local chess = Chess()
-        it(string.format('%s (%s)', position.fen, tostring(position.should_pass)), function()
-            chess.load(position.fen)
-            if position.should_pass then
-                assert.are.equals(chess.fen(), position.fen)
-            else
-                assert.are_not.equals(chess.fen(), position.fen)
-            end
+    local invalidPositions = {
+        -- incomplete FEN string
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBN w KQkq - 0 1",
+
+        -- bad digit (9)
+        "rnbqkbnr/pppppppp/9/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+
+        -- bad piece (X)
+        "1nbqkbn1/pppp1ppX/8/4p3/4P3/8/PPPP1PPP/1NBQKBN1 b - - 1 2",
+
+        -- bad ep square
+        "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e9 0 1",
+    }
+
+    local chess = Chess()
+
+    forEach(validPositions, function(fen)
+        it("Valid FEN - " .. fen, function()
+            assert.True(chess.load(fen))
+            assert.are.equals(chess.fen(), fen)
         end)
     end)
 
+    forEach(invalidPositions, function(fen)
+        it("Invalid FEN - " .. fen, function()
+            assert.False(chess.load(fen))
+        end)
+    end)
 end)
 
 describe("PGN #pgn", function()
 
-    --local passed = true
-    local error_message
     local positions = {
         { moves = { 'd4', 'd5', 'Nf3', 'Nc6', 'e3', 'e6', 'Bb5', 'g5', 'O-O', 'Qf6', 'Nc3',
                     'Bd7', 'Bxc6', 'Bxc6', 'Re1', 'O-O-O', 'a4', 'Bb4', 'a5', 'b5', 'axb6',
@@ -421,26 +425,17 @@ describe("PGN #pgn", function()
     }
 
     forEach(positions, function(position, i)
-        it(i, function()
+        it('Postion: ' .. i, function()
             local chess = Chess(position.starting_position)
-            --passed=true
-            error_message = ""
-            for _, move in ipairs(position.moves) do
-                if not chess.move(move) then
-                    error_message = "move() did not accept " .. move .. "  = "
-                    break
-                end
-            end
+            forEach(position.moves, function(move)
+                assert.is_not_nil(chess.move(move))
+            end)
             chess.header(unpack(position.header))
             local pgn = chess.pgn({ max_width = position.max_width, newline_char = position.newline_char })
-            local fen = chess.fen()
-            --passed = pgn == position.pgn and fen == position.fen
-            assert.is_true(#error_message == 0)
-            assert.are.equals(position.pgn, pgn)
-            assert.are.equals(position.fen, fen)
+            assert.are.equals(pgn, position.pgn)
+            assert.are.equals(chess.fen(), position.fen)
         end)
     end)
-
 end)
 
 describe("Load PGN #loadpgn", function()
@@ -782,247 +777,197 @@ describe("Load PGN #loadpgn", function()
 
 end)
 
-describe(
-        "Manipulate Comments #mpcmts",
-        function()
-            -- var is_empty = function (object) {
-            --     for (var property in object) {
-            --       if (object.hasOwnProperty(property)) {
-            --         return false;
-            --       }
-            --     }
-            --     return true;
-            -- };
-            it(
-                    "no comments",
-                    function()
-                        local chess = Chess()
-                        assert.is.falsy(chess.get_comment())
-                        assert.are.same(chess.get_comments(), {})
-                        chess.move("e4")
-                        assert.is.falsy(chess.get_comment())
-                        assert.are.same(chess.get_comments(), {})
-                        assert.are.equals("1. e4", chess.pgn())
-                    end
-            )
+describe("Manipulate Comments #mpcmts", function()
 
-            it(
-                    "comment for initial position",
-                    function()
-                        local chess = Chess()
-                        chess.set_comment("starting position")
-                        assert.are.equals("starting position", chess.get_comment())
-                        assert.are.same(chess.get_comments(), { { fen = chess.fen(), comment = "starting position" } })
-                        assert.are.equals("{starting position}", chess.pgn())
-                    end
-            )
+    it("no comments", function()
+        local chess = Chess()
+        assert.is.falsy(chess.get_comment())
+        assert.are.same(chess.get_comments(), {})
+        chess.move("e4")
+        assert.is.falsy(chess.get_comment())
+        assert.are.same(chess.get_comments(), {})
+        assert.are.equals("1. e4", chess.pgn())
+    end
+    )
 
-            it(
-                    "comment for first move",
-                    function()
-                        local chess = Chess()
-                        chess.move("e4")
-                        local e4 = chess.fen()
-                        chess.set_comment("good move")
-                        assert.are.equals("good move", chess.get_comment())
-                        assert.are.same({ { fen = e4, comment = "good move" } }, chess.get_comments())
-                        chess.move("e5")
-                        assert.is.falsy(chess.get_comment())
-                        assert.are.same({ { fen = e4, comment = "good move" } }, chess.get_comments())
-                        assert.are.equals("1. e4 {good move} e5", chess.pgn())
-                    end
-            )
+    it("comment for initial position", function()
+        local chess = Chess()
+        chess.set_comment("starting position")
+        assert.are.equals("starting position", chess.get_comment())
+        assert.are.same(chess.get_comments(), { { fen = chess.fen(), comment = "starting position" } })
+        assert.are.equals("{starting position}", chess.pgn())
+    end
+    )
 
-            it(
-                    "comment for last move",
-                    function()
-                        local chess = Chess()
-                        chess.move("e4")
-                        chess.move("e6")
-                        chess.set_comment("dubious move")
-                        assert.are.equals("dubious move", chess.get_comment())
-                        assert.are.same({ { fen = chess.fen(), comment = "dubious move" } }, chess.get_comments())
-                        assert.are.equals("1. e4 e6 {dubious move}", chess.pgn())
-                    end
-            )
+    it("comment for first move", function()
+        local chess = Chess()
+        chess.move("e4")
+        local e4 = chess.fen()
+        chess.set_comment("good move")
+        assert.are.equals("good move", chess.get_comment())
+        assert.are.same({ { fen = e4, comment = "good move" } }, chess.get_comments())
+        chess.move("e5")
+        assert.is.falsy(chess.get_comment())
+        assert.are.same({ { fen = e4, comment = "good move" } }, chess.get_comments())
+        assert.are.equals("1. e4 {good move} e5", chess.pgn())
+    end
+    )
 
-            it(
-                    "comment with brackets",
-                    function()
-                        local chess = Chess()
-                        chess.set_comment("{starting position}")
-                        assert.are.equals("[starting position]", chess.get_comment())
-                    end
-            )
+    it("comment for last move", function()
+        local chess = Chess()
+        chess.move("e4")
+        chess.move("e6")
+        chess.set_comment("dubious move")
+        assert.are.equals("dubious move", chess.get_comment())
+        assert.are.same({ { fen = chess.fen(), comment = "dubious move" } }, chess.get_comments())
+        assert.are.equals("1. e4 e6 {dubious move}", chess.pgn())
+    end
+    )
 
-            it(
-                    "comments for everything",
-                    function()
-                        local chess = Chess()
+    it("comment with brackets", function()
+        local chess = Chess()
+        chess.set_comment("{starting position}")
+        assert.are.equals("[starting position]", chess.get_comment())
+    end
+    )
 
-                        local initial = chess.fen()
-                        chess.set_comment("starting position")
-                        assert.are.equals("starting position", chess.get_comment())
-                        assert.are.same({ { fen = initial, comment = "starting position" } }, chess.get_comments())
-                        assert.are.equals("{starting position}", chess.pgn())
+    it("comments for everything", function()
+        local chess = Chess()
 
-                        chess.move("e4")
-                        local e4 = chess.fen()
-                        chess.set_comment("good move")
-                        assert.are.equals("good move", chess.get_comment())
-                        assert.are.same(
-                                {
-                                    { fen = initial, comment = "starting position" },
-                                    { fen = e4, comment = "good move" }
-                                },
-                                chess.get_comments()
-                        )
-                        assert.are.equals("{starting position} 1. e4 {good move}", chess.pgn())
+        local initial = chess.fen()
+        chess.set_comment("starting position")
+        assert.are.equals("starting position", chess.get_comment())
+        assert.are.same({ { fen = initial, comment = "starting position" } }, chess.get_comments())
+        assert.are.equals("{starting position}", chess.pgn())
 
-                        chess.move("e6")
-                        local e6 = chess.fen()
-                        chess.set_comment("dubious move")
-                        assert.are.equals("dubious move", chess.get_comment())
-                        assert.are.same(
-                                {
-                                    { fen = initial, comment = "starting position" },
-                                    { fen = e4, comment = "good move" },
-                                    { fen = e6, comment = "dubious move" }
-                                },
-                                chess.get_comments()
-                        )
-                        assert.are.equals("{starting position} 1. e4 {good move} e6 {dubious move}", chess.pgn())
-                    end
-            )
+        chess.move("e4")
+        local e4 = chess.fen()
+        chess.set_comment("good move")
+        assert.are.equals("good move", chess.get_comment())
+        assert.are.same(
+                {
+                    { fen = initial, comment = "starting position" },
+                    { fen = e4, comment = "good move" }
+                },
+                chess.get_comments()
+        )
+        assert.are.equals("{starting position} 1. e4 {good move}", chess.pgn())
 
-            it(
-                    "delete comments",
-                    function()
-                        local chess = Chess()
-                        assert.is.falsy(chess.delete_comment())
-                        assert.are.same({}, chess.delete_comments())
-                        local initial = chess.fen()
-                        chess.set_comment("starting position")
-                        chess.move("e4")
-                        local e4 = chess.fen()
-                        chess.set_comment("good move")
-                        chess.move("e6")
-                        local e6 = chess.fen()
-                        chess.set_comment("dubious move")
-                        assert.are.same(
-                                {
-                                    { fen = initial, comment = "starting position" },
-                                    { fen = e4, comment = "good move" },
-                                    { fen = e6, comment = "dubious move" }
-                                },
-                                chess.get_comments()
-                        )
-                        assert.are.equals("dubious move", chess.delete_comment())
-                        assert.are.equals("{starting position} 1. e4 {good move} e6", chess.pgn())
-                        assert.is.falsy(chess.delete_comment())
-                        assert.are.same(
-                                {
-                                    { fen = initial, comment = "starting position" },
-                                    { fen = e4, comment = "good move" }
-                                },
-                                chess.delete_comments()
-                        )
-                        assert.are.equals("1. e4 e6", chess.pgn())
-                    end
-            )
+        chess.move("e6")
+        local e6 = chess.fen()
+        chess.set_comment("dubious move")
+        assert.are.equals("dubious move", chess.get_comment())
+        assert.are.same(
+                {
+                    { fen = initial, comment = "starting position" },
+                    { fen = e4, comment = "good move" },
+                    { fen = e6, comment = "dubious move" }
+                },
+                chess.get_comments()
+        )
+        assert.are.equals("{starting position} 1. e4 {good move} e6 {dubious move}", chess.pgn())
+    end
+    )
 
-            it(
-                    "prune comments",
-                    function()
-                        local chess = Chess()
-                        chess.move("e4")
-                        chess.set_comment("tactical")
-                        chess.undo()
-                        chess.move("d4")
-                        chess.set_comment("positional")
-                        assert.are.same({ { fen = chess.fen(), comment = "positional" } }, chess.get_comments())
-                        assert.are.equals("1. d4 {positional}", chess.pgn())
-                    end
-            )
+    it("delete comments", function()
+        local chess = Chess()
+        assert.is.falsy(chess.delete_comment())
+        assert.are.same({}, chess.delete_comments())
+        local initial = chess.fen()
+        chess.set_comment("starting position")
+        chess.move("e4")
+        local e4 = chess.fen()
+        chess.set_comment("good move")
+        chess.move("e6")
+        local e6 = chess.fen()
+        chess.set_comment("dubious move")
+        assert.are.same(
+                {
+                    { fen = initial, comment = "starting position" },
+                    { fen = e4, comment = "good move" },
+                    { fen = e6, comment = "dubious move" }
+                },
+                chess.get_comments()
+        )
+        assert.are.equals("dubious move", chess.delete_comment())
+        assert.are.equals("{starting position} 1. e4 {good move} e6", chess.pgn())
+        assert.is.falsy(chess.delete_comment())
+        assert.are.same(
+                {
+                    { fen = initial, comment = "starting position" },
+                    { fen = e4, comment = "good move" }
+                },
+                chess.delete_comments()
+        )
+        assert.are.equals("1. e4 e6", chess.pgn())
+    end
+    )
 
-            it(
-                    "clear comments",
-                    function()
-                        local test = function(fn)
-                            local chess = Chess()
-                            chess.move("e4")
-                            chess.set_comment("good move")
-                            assert.are.same({ { fen = chess.fen(), comment = "good move" } }, chess.get_comments())
-                            fn(chess)
-                            assert.are.same({}, chess.get_comments())
-                        end
-                        test(
-                                function(chess)
-                                    chess.reset()
-                                end
-                        )
-                        test(
-                                function(chess)
-                                    chess.clear()
-                                end
-                        )
-                        test(
-                                function(chess)
-                                    chess.load(chess.fen())
-                                end
-                        )
-                        test(
-                                function(chess)
-                                    chess.load_pgn("1. e4")
-                                end
-                        )
-                    end
-            )
+    it("prune comments", function()
+        local chess = Chess()
+        chess.move("e4")
+        chess.set_comment("tactical")
+        chess.undo()
+        chess.move("d4")
+        chess.set_comment("positional")
+        assert.are.same({ { fen = chess.fen(), comment = "positional" } }, chess.get_comments())
+        assert.are.equals("1. d4 {positional}", chess.pgn())
+    end
+    )
+
+    it("clear comments", function()
+        local test = function(fn)
+            local chess = Chess()
+            chess.move("e4")
+            chess.set_comment("good move")
+            assert.are.same({ { fen = chess.fen(), comment = "good move" } }, chess.get_comments())
+            fn(chess)
+            assert.are.same({}, chess.get_comments())
         end
+        test(
+                function(chess)
+                    chess.reset()
+                end
+        )
+        test(
+                function(chess)
+                    chess.clear()
+                end
+        )
+        test(
+                function(chess)
+                    chess.load(chess.fen())
+                end
+        )
+        test(
+                function(chess)
+                    chess.load_pgn("1. e4")
+                end
+        )
+    end
+    )
+end
 )
 
-describe(
-        "Format Comments #fmtcmts",
-        function()
-            it(
-                    "wrap comments",
-                    function()
-                        local chess = Chess()
-                        chess.move("e4")
-                        chess.set_comment("good   move")
-                        chess.move("e5")
-                        chess.set_comment("classical response")
-                        assert.are.equals("1. e4 {good   move} e5 {classical response}", chess.pgn())
-                        assert.are.same(
-                                table.concat(
-                                        {
-                                            "1. e4 {good",
-                                            "move} e5",
-                                            "{classical",
-                                            "response}"
-                                        },
-                                        "\n"
-                                ),
-                                chess.pgn({ max_width = 16 })
-                        )
-                        assert.are.equals(
-                                table.concat(
-                                        {
-                                            "1.",
-                                            "e4",
-                                            "{good",
-                                            "move}",
-                                            "e5",
-                                            "{classical",
-                                            "response}"
-                                        },
-                                        "\n"
-                                ),
-                                chess.pgn({ max_width = 2 })
-                        )
-                    end
-            )
-        end
+describe("Format Comments #fmtcmts", function()
+    it("wrap comments", function()
+        local chess = Chess()
+        chess.move("e4")
+        chess.set_comment("good   move")
+        chess.move("e5")
+        chess.set_comment("classical response")
+        assert.are.equals("1. e4 {good   move} e5 {classical response}", chess.pgn())
+        assert.are.same(
+                table.concat({ "1. e4 {good", "move} e5", "{classical", "response}" }, "\n"),
+                chess.pgn({ max_width = 16 })
+        )
+        assert.are.equals(
+                table.concat({ "1.", "e4", "{good", "move}", "e5", "{classical", "response}" }, "\n"),
+                chess.pgn({ max_width = 2 })
+        )
+    end
+    )
+end
 )
 
 describe(
@@ -1091,18 +1036,14 @@ describe(
                 }
             }
 
-            forEach(
-                    tests,
-                    function(test)
-                        it(
-                                string.format("load %s", test.name),
-                                function()
-                                    local chess = Chess()
-                                    chess.load_pgn(test.input)
-                                    assert.are.equals(test.output, chess.pgn())
-                                end
-                        )
-                    end
+            forEach(tests, function(test)
+                it(string.format("load %s", test.name), function()
+                    local chess = Chess()
+                    chess.load_pgn(test.input)
+                    assert.are.equals(test.output, chess.pgn())
+                end
+                )
+            end
             )
         end
 )
@@ -1683,13 +1624,62 @@ describe('Regression Tests #reg', function()
     end)
 
     it('Github Issue #284 - sloppy settings allows illegal moves', function()
-        local chess = Chess('4k3/8/8/8/8/4p3/8/4K3 w - - 0 1');
+        local chess = Chess('4k3/8/8/8/8/4p3/8/4K3 w - - 0 1')
         assert.is_nil(chess.move('e1f2', { sloppy = true }))
-    end);
+    end)
 
     it('Github Issue #282 - playing a move on an empty board throws an error', function()
-        local chess = Chess('8/8/8/8/8/8/8/8 w KQkq - 0 1');
+        local chess = Chess('8/8/8/8/8/8/8/8 w KQkq - 0 1')
         assert.is_nil(chess.move('e4'))
-    end);
+    end)
+
+    it('Github Issue #279 - load_pgn duplicate last move if it has a comment', function()
+        local history = { 'e4', 'e5', 'Nf3', 'Nc6', 'Bb5', 'd6',
+                          'd4', 'Bd7', 'Nc3', 'Nf6', 'Bxc6' }
+
+        -- trailing comment - no end of game marker
+        local chess = Chess()
+        local result = chess.load_pgn("1. e4 e5 2. Nf3 Nc6 3. Bb5 d6 " .. "4. d4 Bd7 5. Nc3 Nf6 6. Bxc6 {comment}")
+        assert.True(result)
+        assert.are.same(chess.history(), history)
+        assert.is_nil(chess.header()['Result'])
+
+        -- trailing comment - end of game marker after comment
+        result = chess.load_pgn("1. e4 e5 2. Nf3 Nc6 3. Bb5 d6 " .. "4. d4 Bd7 5. Nc3 Nf6 6. Bxc6 {comment} *")
+        assert.True(result)
+        assert.are.same(chess.history(), history)
+        assert.is_nil(chess.header()['Result'])
+
+        -- trailing comment - end of game marker before comment
+        result = chess.load_pgn("1. e4 e5 2. Nf3 Nc6 3. Bb5 d6 " .. "4. d4 Bd7 5. Nc3 Nf6 6. Bxc6 * {comment}")
+        assert.True(result)
+        assert.are.same(chess.history(), history)
+        assert.is_nil(chess.header()['Result'])
+
+        -- trailing comment with PGN header - no end of game marker
+        result = chess.load_pgn("[White \"name\"]\n\n" .. "1. e4 e5 2. Nf3 Nc6 " .. "3. Bb5 d6 " .. "4. d4 Bd7 5. Nc3 Nf6 " .. "6. Bxc6 {comment}")
+        assert.True(result)
+        assert.are.same(chess.history(), history)
+        assert.is_nil(chess.header()['Result'])
+
+        -- trailing comment with result header - end of game marker after comment
+        result = chess.load_pgn("[White \"name\"]\n\n" .. "1. e4 e5 2. Nf3 Nc6 3. Bb5 d6 " .. "4. d4 Bd7 5. Nc3 Nf6 6. Bxc6 {comment} *")
+        assert.True(result)
+        assert.are.same(chess.history(), history)
+        assert.are.equals(chess.header()['Result'], '*')
+
+        -- trailing comment with result header - end of game marker before comment
+        result = chess.load_pgn("[White \"name\"]\n\n" .. "1. e4 e5 2. Nf3 Nc6 3. Bb5 d6 " .. "4. d4 Bd7 5. Nc3 Nf6 6. Bxc6 1/2-1/2 {comment}")
+        assert.True(result)
+        assert.are.same(chess.history(), history)
+        assert.are.equals(chess.header()['Result'], '1/2-1/2')
+    end)
+
+    it('Github Issue #286 - pgn should not generate sloppy moves', function()
+        local chess = Chess()
+        chess.load_pgn('1. e4 d5 2. Nf3 Nd7 3. Bb5 Nf6 4. O-O')
+        assert.are.equals(chess.pgn(), '1. e4 d5 2. Nf3 Nd7 3. Bb5 Nf6 4. O-O')
+    end)
+
 end)
 

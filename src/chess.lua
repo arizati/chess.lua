@@ -25,7 +25,7 @@ local SYMBOLS = 'pnbrqkPNBRQK'
 
 local DEFAULT_POSITION = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 
-local POSSIBLE_RESULTS = { '1-0', '0-1', '1/2-1/2', '*' }
+local TERMINATION_MARKERS = { ['1-0'] = true, ['0-1'] = true, ['1/2-1/2'] = true, ['*'] = true }
 
 local PAWN_OFFSETS = {
     b = { 16, 32, 17, 15 },
@@ -1649,7 +1649,8 @@ local function ctor(_m, start_fen)
                     move_string_buffer = self_move_number .. '.'
                 end
 
-                move_string_buffer = string.format('%s %s', move_string_buffer, move_to_san(move, generate_moves({ legal = false })))
+                move_string_buffer = string.format('%s %s',
+                        move_string_buffer, move_to_san(move, generate_moves({ legal = true })))
 
                 make_move(move)
             end
@@ -1909,52 +1910,40 @@ local function ctor(_m, start_fen)
             local moves = str_split(ms)
 
             local move
-            local moves_len = #moves
-            local comment
-            for hm = 1, moves_len - 1 do
-                comment = decode_comment(moves[hm])
+            local result
+            for _, mv in ipairs(moves) do
+               local comment = decode_comment(mv)
                 if comment then
                     add_comment(generate_fen(), comment)
                     --continue
                 else
-                    move = move_from_san(moves[hm], sloppy)
+                    move = move_from_san(mv, sloppy)
 
-                    -- move not possible! (don't clear the board to examine to show the
-                    -- latest valid position)
+                    -- invalid move
                     if not move then
-                        return false
+                        -- was the move an end of game marker
+                        if TERMINATION_MARKERS[mv] then
+                            result = mv
+                        else
+                            return false
+                        end
                     else
+                        -- reset the end of game marker if making a valid move
+                        result = nil
                         make_move(move)
                     end
                 end
             end
 
-            comment = decode_comment(moves[moves_len])
-            if comment then
-                add_comment(generate_fen(), comment)
-                moves[moves_len] = nil
+            -- Per section 8.2.6 of the PGN spec, the Result tag pair must
+            -- match the termination marker. Only do this when headers are present,
+            -- but the result tag is missing
+            if result and result ~= ''
+                    and next(self_header)
+                    and (self_header['Result'] == nil or self_header['Result'] == '') then
+                set_header({ 'Result', result })
             end
 
-            -- examine last move
-            move = moves[#moves]
-
-            local results_test = {}
-            for _, r in ipairs(POSSIBLE_RESULTS) do
-                results_test[r] = true
-            end
-
-            if results_test[move] then
-                if #self_header_keys > 0 and not self_header.Result then
-                    set_header({ 'Result', move })
-                end
-            else
-                move = move_from_san(move, sloppy)
-                if not move then
-                    return false
-                else
-                    make_move(move)
-                end
-            end
             return true
         end,
         header = function(...) return set_header({ ... }) end,
