@@ -224,7 +224,7 @@ local function validate_fen(fen)
         [12] = 'No errors.',
     }
 
-    --- 1st criterion: 6 space-seperated fields? 
+    --- 1st criterion: 6 space-seperated fields?
     local tokens = str_split(fen)
     if #tokens ~= 6 then
         return { valid = false, error_number = 1, error = errors[1] }
@@ -248,7 +248,7 @@ local function validate_fen(fen)
         return { valid = false, error_number = 4, error = errors[4] }
     end
 
-    --- 5th criterion: 3th field is a valid castle-string? 
+    --- 5th criterion: 3th field is a valid castle-string?
     local function valid_castle_str(str)
         if str == '-' or str == 'q' then return true end
         local str_find = string.find
@@ -261,7 +261,7 @@ local function validate_fen(fen)
         return { valid = false, error_number = 5, error = errors[5] }
     end
 
-    --- 6th criterion: 2nd field is "w" (white) or "b" (black)? 
+    --- 6th criterion: 2nd field is "w" (white) or "b" (black)?
     local t2 = tokens[2]
     if not (t2 == 'w' or t2 == 'b') then
         return { valid = false, error_number = 6, error = errors[6] }
@@ -1365,46 +1365,76 @@ local function ctor(_m, start_fen)
     end
     -- convert a move from Standard Algebraic Notation (SAN) to 0x88 coordinates
     local function move_from_san(move, sloppy)
-        -- strip off any move decorations: e.g Nf3+?!
+        -- strip off any move decorations: e.g Nf3+?! becomes Nf3
         local clean_move = stripped_san(move)
 
-        -- if we're using the sloppy parser run a regex to grab piece, to, and from
-        -- this should parse invalid SAN like: Pe2-e4, Rc1c4, Qf3xf7
+        local overly_disambiguated = false
+
         local piece, from, to, promotion
         if sloppy then
+            -- The sloppy parser allows the user to parse non-standard chess
+            -- notations. This parser is opt-in (by specifying the
+            -- '{ sloppy: true }' setting) and is only run after the Standard
+            -- Algebraic Notation (SAN) parser has failed.
+            --
+            -- When running the sloppy parser, we'll run a regex to grab the piece,
+            -- the to/from square, and an optional promotion piece. This regex will
+            -- parse common non-standard notation like: Pe2-e4, Rc1c4, Qf3xf7, f7f8q,
+            -- b1c3
+
+            -- NOTE: Some positions and moves may be ambiguous when using the sloppy
+            -- parser. For example, in this position: 6k1/8/8/B7/8/8/8/BN4K1 w - - 0 1,
+            -- the move b1c3 may be interpreted as Nc3 or B1c3 (a disambiguated
+            -- bishop move). In these cases, the sloppy parser will default to the
+            -- most most basic interpretation - b1c3 parses to Nc3.
+
             piece, from, to, promotion = clean_move:match("([pnbrqkPNBRQK]?)([a-h][1-8])x?%-?([a-h][1-8])([qrbnQRBN]?)")
+
+            -- once matched, piece should be a string
+            if piece == nil then
+                -- The [a-h]?[1-8]? portion of the regex below handles moves that may
+                -- be overly disambiguated (e.g. Nge7 is unnecessary and non-standard
+                -- when there is one legal knight move to e7). In this case, the value
+                -- of 'from' variable will be a rank or file, not a square.
+                piece, from, to, promotion = clean_move:match("([pnbrqkPNBRQK]?)([a-h]?[1-8]?)x?%-?([a-h][1-8])([qrbnQRBN]?)")
+                if from ~= nil and #from == 1 then
+                    overly_disambiguated = true
+                end
+            end
+
         end
 
         local piece_type = infer_piece_type(clean_move)
-        local moves
-        local legalMoves = generate_moves({
+        local moves = generate_moves({
             legal = true,
             piece = piece ~= '' and piece or piece_type,
         })
-        moves = legalMoves
-        local illegalMoves
-        if sloppy then
-            illegalMoves = generate_moves({
-                legal = false,
-                piece = piece ~= '' and piece or piece_type,
-            })
-            moves = illegalMoves
-        end
 
         for _, v in ipairs(moves) do
             -- try the strict parser first, then the sloppy parser if requested
             -- by the user
-            if (clean_move == stripped_san(move_to_san(v, legalMoves)))
-                    or (sloppy and clean_move == stripped_san(move_to_san(v, illegalMoves)))
-            then
+            if (clean_move == stripped_san(move_to_san(v, moves))) then
                 return v
-            else
+            elseif sloppy and piece ~= nil then
+                -- hand-compare move properties with the results from our sloppy
+                -- regex
                 if (not piece or piece == '' or piece:lower() == v.piece)
                         and SQUARES[from] == v.from
                         and SQUARES[to] == v.to
                         and (not promotion or promotion == '' or promotion:lower() == v.promotion)
                 then
                     return v
+                elseif overly_disambiguated then
+                    -- SPECIAL CASE: we parsed a move string that may have an unneeded
+                    -- rank/file disambiguator (e.g. Nge7).  The 'from' variable will
+                    local square = algebraic(v.from)
+                    if (not piece or piece == '' or piece:lower() == v.piece)
+                            and SQUARES[to] == v.to and
+                            (from == square:sub(1, 1) or from == square:sub(2, 2)) and
+                            (not promotion or promotion == '' or promotion:lower() == v.promotion)
+                    then
+                        return v
+                    end
                 end
             end
         end
@@ -1500,23 +1530,23 @@ local function ctor(_m, start_fen)
         in_threefold_repetition = in_threefold_repetition,
         game_over = function()
             if in_checkmate() then
-                return true, 'checkmate'
+                return true, self_turn == WHITE and '0-1' or '1-0'
             end
 
             if in_stalemate() then
-                return true, 'draw', 'Stalemate'
+                return true, '1/2-1/2', 'Stalemate'
             end
 
             if insufficient_material() then
-                return true, 'draw', 'Insufficient material'
+                return true, '1/2-1/2', 'Insufficient material'
             end
 
             if in_threefold_repetition() then
-                return true, 'draw', 'Threefold repetition'
+                return true, '1/2-1/2', 'Threefold repetition'
             end
 
             if self_half_moves >= 100 then
-                return true, 'draw', 'Fifty-move rule'
+                return true, '1/2-1/2', 'Fifty-move rule'
             end
 
             return false

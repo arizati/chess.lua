@@ -1681,5 +1681,15 @@ describe('Regression Tests #reg', function()
         }
         assert.are.same(expected, chess.header())
     end)
+
+    it('Github Issue #284 - sloppy settings allows illegal moves', function()
+        local chess = Chess('4k3/8/8/8/8/4p3/8/4K3 w - - 0 1');
+        assert.is_nil(chess.move('e1f2', { sloppy = true }))
+    end);
+
+    it('Github Issue #282 - playing a move on an empty board throws an error', function()
+        local chess = Chess('8/8/8/8/8/8/8/8 w KQkq - 0 1');
+        assert.is_nil(chess.move('e4'))
+    end);
 end)
 
